@@ -1,11 +1,11 @@
 # Stage: An Index_Organized Data Layout Scheme for In-memory Database Systems
 An index_organized data layout scheme for in-memory database systems.
-This repo contains implementations of our open-source in-memory database storage shceme:
-- An index_organized data layout for reducing pointer chasing, which is the major problem that causes current memory access latency.
+This repo contains implementations of our open-source in-memory database storage scheme:
+- An index_organized data layout for reducing pointer chasing, which is the major problem that causes memory access latency.
 - A staged approach to maintain the lifetimes of the versions.
 - An active version tree, which is a modified version of the [BzTree](https://github.com/sfu-dis/bztree) for volatile memory(DRAM).
 - Optimistic concurrency control policy designed for hot versions.
-- YCSB/TPCC/HYBRID workload benchmarks, which have been used in many reseaches, e.g.[spitfire](https://github.com/zxjcarrot/spitfire), [ermia](https://github.com/sfu-dis/ermia).
+- YCSB/TPCC/HYBRID workload benchmarks, which have been used in many researches, e.g.[spitfire](https://github.com/zxjcarrot/spitfire), [ermia](https://github.com/sfu-dis/ermia).
 
 ## Building
 
@@ -44,7 +44,7 @@ Command line options : ycsb <options>
    -z --zipf_theta        :  theta to control skewness 
    -l --loader_count      :  # of loaders 
    -s --shuffle_keys      :  whether to shuffle keys at startup (Default: fasle)
-   -r --random_mode       :  whether key is random
+   -r --random_mode       :  whether key is random distribution access
    -m --string_mode       :  whether key is string
    -n --scan_mode         :  whether scan only workload
 ```
