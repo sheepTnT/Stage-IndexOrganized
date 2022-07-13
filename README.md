@@ -25,7 +25,7 @@ sudo cd stage
 sudo mkdir build
 sudo cd build
 sudo cmake -DCMAKE_BUILD_TYPE=Release .. 
-sudo make -j 4 ycsb (sudo make -j 4 tpcc)
+sudo make -j4 ycsb (sudo make -j4 tpcc)
 ```
 
 ## Playing with Stage
@@ -60,9 +60,9 @@ Command line options : ycsb <options>
    -e --exp_backoff       :  enable exponential backoff 
    -l --loader_count      :  # of loaders 
    -w --warehouse_count   :  # warehouse counts 
-   -s --hybrid_rate       :  # the percentage of query2 when mixing new-order and query2 
-   -o --new_order_rate    :  # the percentage of new-order when mixing new-order and stock-level 
-   -r --stock_level_rate  :  # the percentage of stock-level when mixing new-order and stock-level 
+   -s --hybrid_rate       :  the ratio of query2 when mixing new-order and query2 
+   -o --new_order_rate    :  the ratio of new-order when mixing new-order and stock-level 
+   -r --stock_level_rate  :  the ratio of stock-level when mixing new-order and stock-level 
 ```
 ### Run it with YCSB 
 ```bash
