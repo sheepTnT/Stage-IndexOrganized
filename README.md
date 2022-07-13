@@ -20,7 +20,7 @@ sudo apt-get install libgoogle-perftools-dev libtbb-dev
 
 ### Build
 ```bash
-sudo git clone 
+sudo git clone https://github.com/gitzhqian/Stage.git
 sudo cd stage
 sudo mkdir build
 sudo cd build
