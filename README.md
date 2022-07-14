@@ -1,11 +1,13 @@
-# Stage: An Index_Organized Data Layout Scheme for In-memory Database Systems
-An index_organized data layout scheme for in-memory database systems.
-This repo contains implementations of our open-source in-memory database storage scheme:
-- An index_organized data layout for reducing pointer chasing, which is the major problem that causes memory access latency.
-- A staged approach to maintain the lifetimes of the versions.
+# What is Stage ?
+An index organized data layout scheme for in-memory database systems.
+
+# Implementations
+This repo contains our open-source implementations:
+- An index_organized layout designed for in-memory DBMSs to store data.
+- A staged approach to maintain the lifetimes of the record versions.
 - An active version tree, which is a modified version of the [BzTree](https://github.com/sfu-dis/bztree) for volatile memory(DRAM).
-- Optimistic concurrency control policy designed for hot versions.
-- YCSB/TPCC/HYBRID workload benchmarks, which have been used in many researches, e.g.[spitfire](https://github.com/zxjcarrot/spitfire), [ermia](https://github.com/sfu-dis/ermia).
+- Optimistic concurrency control policy designed for hot record versions.
+- YCSB/TPCC/HYBRID workload benchmarks refered to other researches, e.g.[spitfire](https://github.com/zxjcarrot/spitfire), [ermia](https://github.com/sfu-dis/ermia).
 
 ## Building
 
