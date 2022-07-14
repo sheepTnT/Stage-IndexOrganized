@@ -9,18 +9,18 @@ This repo contains our open-source implementations:
 - Optimistic concurrency control policy designed for hot record versions.
 - YCSB/TPCC/HYBRID workload benchmarks refered to other researches, e.g.[spitfire](https://github.com/zxjcarrot/spitfire), [ermia](https://github.com/sfu-dis/ermia).
 
-## Building
+# Building
 
-### Environment
+## Environment
 The code has been tested on Ubuntu 20.04 with gcc version 9.4.0 and cmake3.17.
 
-### Dependencies
+## Dependencies
 ```bash
 sudo apt-get install libgoogle-perftools-dev libtbb-dev
 ......
 ```
 
-### Build
+## Build
 ```bash
 sudo git clone https://github.com/gitzhqian/Stage.git
 sudo cd stage
@@ -30,7 +30,7 @@ sudo cmake -DCMAKE_BUILD_TYPE=Release ..
 sudo make -j4 ycsb (sudo make -j4 tpcc)
 ```
 
-## Playing with Stage
+# Running
 Command line options available for the `ycsb` benchmark are as follows:
 ```bash
 cd build
@@ -66,7 +66,7 @@ Command line options : ycsb <options>
    -o --new_order_rate    :  the ratio of new-order when mixing new-order and stock-level 
    -r --stock_level_rate  :  the ratio of stock-level when mixing new-order and stock-level 
 ```
-### Run it with YCSB 
+## Run it with YCSB 
 ```bash
 sudo ./ycsb -k 10000 -d 20 -p 4 -b 4 -o 10 -u 0.2 -z 0.2 -l 4
 ```
@@ -82,7 +82,7 @@ The output looks like this:
  scan_latency(ms) : 0.000000
 
 ```
-### Run it with TPCC/HYBRID
+## Run it with TPCC/HYBRID
 ```bash
 sudo ./tpcc -d 20 -b 6 -l 5 -w 30 -s 0 -o 1 -r 0
 ```
@@ -108,17 +108,17 @@ overall throughputs:
 
 ```
 
-## For Logging
+# For Logging
 
-### Hardware Setup
+## Hardware Setup
 Stage implements redo logging by placing the log files on NVM. Stage places the log records on NVM-backed filesystem using `mmap`. Therefore, you need to configure the Optane DIMM in `app-direct` mode and mount an `fsdax` mode file system on top of the device. Check out this [tutorial](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/storage_administration_guide/configuring-persistent-memory-for-file-system-direct-access-dax) on how to configure the device and the file system. Once the file system is configured and mounted, create one directory for storing NVM log files. Now, we set the default path by `/mnt/pmem5/heapfile`. Make sure you have the permission to read and write to the file.
 
-### Intel PCM
+## Intel PCM
 Stage relies on [Processor Counter Monitor](https://github.com/opcm/pcm) to collect hardware metrics.
 ```bash
 $ modprobe msr
 ```
-### Setting
+## Setting
 You shold modify the file `include\common\constants.h`
 ```bash
 nvm_emulate = false
@@ -141,6 +141,6 @@ PCM Metrics:
 
 ```
 
-## Caveats
+# Caveats
 - The main memory recovery(logging, checkpoint and restart) is not fully implemented.
 - The memory reclaim design is not fully implemented.
