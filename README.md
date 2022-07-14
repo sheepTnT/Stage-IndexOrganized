@@ -109,7 +109,7 @@ overall throughputs:
 ## For Logging
 
 ### Hardware Setup
-Stage implements redo logging by placing the log files on NVM. Stage places the log records on NVM-backed filesystem using `mmap`. Therefore, you need to configure the Optane DIMM in `app-direct` mode and mount an `fsdax` mode file system on top of the device. Check out this [tutorial](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/storage_administration_guide/configuring-persistent-memory-for-file-system-direct-access-dax) on how to configure the device and the file system. Once the file system is configured and mounted, create one directory for storing NVM log files. Now, we have fixed the path by `/mnt/pmem5/heapfile`. Make sure you have the permission to read and write to the file.
+Stage implements redo logging by placing the log files on NVM. Stage places the log records on NVM-backed filesystem using `mmap`. Therefore, you need to configure the Optane DIMM in `app-direct` mode and mount an `fsdax` mode file system on top of the device. Check out this [tutorial](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/storage_administration_guide/configuring-persistent-memory-for-file-system-direct-access-dax) on how to configure the device and the file system. Once the file system is configured and mounted, create one directory for storing NVM log files. Now, we set the default path by `/mnt/pmem5/heapfile`. Make sure you have the permission to read and write to the file.
 
 ### Intel PCM
 Stage relies on [Processor Counter Monitor](https://github.com/opcm/pcm) to collect hardware metrics.
