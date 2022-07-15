@@ -111,6 +111,9 @@ overall throughputs:
 
 ```
 
+![image](https://user-images.githubusercontent.com/12605803/179178001-ed048d29-3fc3-4e7b-a247-6d510422b92b.png)
+
+
 # For Logging
 
 ## Hardware Setup
@@ -143,6 +146,9 @@ PCM Metrics:
 	NVM Writes (bytes): 10667072
 
 ```
+
+<img src="https://user-images.githubusercontent.com/12605803/179178062-d5203ee9-69b4-4ab1-b22a-8bd49c931b5f.png" width="200", height="100">
+
 
 # Caveats
 - The main memory recovery(logging, checkpoint and restart) is not fully implemented.
