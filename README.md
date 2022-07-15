@@ -77,7 +77,7 @@ The output looks like this:
  operation_count : 10
  update_ratio : 0.200000
  zipf_theta : 0.200000
- throughput(ops/s) : 1279115.500000
+ throughput(kOps) : 1279115.500000
  abort_rate : 0.000000
  scan_latency(ms) : 0.000000
 
@@ -106,7 +106,7 @@ overall throughputs:
  ----------------------------------------------------------
  warehouse_count : 30
  backend_count : 6
- throughput(txns/s) : 15996.350000
+ throughput(ops) : 15996.350000
  abort_rate : 0.015267
  ch_q2* latency(ms) : 0.000000
 
