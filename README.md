@@ -80,6 +80,9 @@ The output looks like this:
  throughput(ops/s) : 1279115.500000
  abort_rate : 0.000000
  scan_latency(ms) : 0.000000
+ 
+ ![image](https://user-images.githubusercontent.com/12605803/179176873-4c2eef3c-043a-42e5-891d-2f7f0617837f.png)
+
 
 ```
 ## Run it with TPCC/HYBRID
