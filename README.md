@@ -147,7 +147,7 @@ PCM Metrics:
 
 ```
 
-<img src="https://user-images.githubusercontent.com/12605803/179178062-d5203ee9-69b4-4ab1-b22a-8bd49c931b5f.png" width="200", height="100" />
+<div align=center><img src="https://user-images.githubusercontent.com/12605803/179178062-d5203ee9-69b4-4ab1-b22a-8bd49c931b5f.png" width="200", height="100" /></div>
 
 
 # Caveats
