@@ -43,10 +43,6 @@ public:
     /**
      * @brief      Gets the instance.
      *
-     * @param[in]  protocol   The protocol
-     * @param[in]  isolation  The isolation
-     * @param[in]  conflict   The conflict
-     *
      * @return     The instance.
      */
     static SSNTransactionManager *GetInstance();
@@ -63,17 +59,15 @@ public:
     }
 
     /**
-     * Test whether the current transaction is the owner of this tuple.
+     * Test whether the current transaction is the owner of this record.
      *
      * @param      current_txn        The current transaction
-     * @param[in]  tile_group_header  The tile group header
-     * @param[in]  tuple_id           The tuple identifier
+     * @param[in]  accessor           The record meta
      *
      * @return     True if owner, False otherwise.
      */
-    virtual bool IsOwner(
-            TransactionContext *const current_txn,
-            RecordMeta &accessor);
+    virtual bool IsOwner(TransactionContext *const current_txn,
+                         RecordMeta &accessor);
 
     /**
      * @param      current_txn        The current transaction
@@ -111,10 +105,7 @@ public:
 
     txn_id_t GetCurrentTidCounter();
     txn_id_t GetNextCurrentTidCounter();
-    /**
-     * @brief      Ends a transaction.
-     * @param      current_txn  The current transaction
-     */
+
     void EndTransaction(TransactionContext *current_txn);
 
     virtual ResultType CommitTransaction(TransactionContext *const current_txn);
@@ -138,6 +129,7 @@ private:
     static IsolationLevelType isolation_level_;
     bool inited = false;
     //transaction undo buffer pool
+    //hold the overwritten record versions
     EphemeralPool *conflict_buffer_pool;
     SpinLatch latch_;
 
