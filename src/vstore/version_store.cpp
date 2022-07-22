@@ -333,14 +333,12 @@ VersionBlockElem VersionBlockManager::AllocateLogBlock() {
 }
 
 void VersionBlockManager::AddVersionBlock(std::shared_ptr<VersionBlock> location) {
-    // add/update the catalog reference to the tile group
     lock_.Lock();
     version_block_array_.push_back(location);
     lock_.Unlock();
 }
 
 void VersionBlockManager::DropVersionBlock(std::shared_ptr<VersionBlock> location) {
-    // drop the catalog reference to the tile group
     for (version_block_iterator_ = version_block_array_.begin();
                 version_block_iterator_ != version_block_array_.end();){
         if(*version_block_iterator_ == location){
@@ -560,7 +558,7 @@ oid_t VersionStore::AddDefaultBlockToManager(const Catalog *catalog,
     //second: Add it to the current catalog active version blocks
     active_version_blocks_[catalog->table_id][active_block_id] = version_block_.get();
 
-    // we must guarantee that the compiler always add tile group before adding
+    // we must guarantee that the compiler always add version block before adding
     COMPILER_MEMORY_FENCE;
 
     LOG_TRACE("Recording version block : %u ", version_block_id);
@@ -638,7 +636,7 @@ std::pair<oid_t,TupleHeader *> VersionStore::GetEmptyTupleSlot(Catalog *catalog,
 
     // get valid tuple.
     while (true) {
-        // get the last tile group.
+        // get the last version block.
         auto table_version_blocks = active_version_blocks_[table_id];
         version_block = table_version_blocks[active_block_id];
 
@@ -689,7 +687,7 @@ LSN_T VersionStore::LogRecordPersist(LogRecord *entry, char **data_ptr) {
 //    LOG_DEBUG("log record persist table id: %u , %u", table_id, active_block_id);
 
     while (true) {
-        // get the last tile group.
+        // get the last version block.
         LOG_DEBUG("log record persist table id: %u , %zu", table_id, active_block_id);
         version_block = active_version_blocks_[table_id][active_block_id];
 
