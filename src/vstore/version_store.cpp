@@ -581,7 +581,7 @@ oid_t VersionStore::AddDefaultBlockToManager(const Catalog *catalog,
 //        retir_active_version_blocks_[table_id].emplace_back(version_block_.get());
     }
 
-    // we must guarantee that the compiler always add version block before adding
+    // we must guarantee that the compiler always add tile group before adding
     COMPILER_MEMORY_FENCE;
 
     LOG_TRACE("Recording version block : %u ", version_block_id);
@@ -666,17 +666,11 @@ std::pair<oid_t,TupleHeader *> VersionStore::GetEmptyTupleSlot(Catalog *catalog,
 
     // get valid tuple.
     while (true) {
-<<<<<<< HEAD
         // get the last tile group.
         auto retir_active_version_blocks = retir_active_version_blocks_[table_id];
         version_block = retir_active_version_blocks[active_block_id];
 //        LOG_DEBUG("active_block_id: %zu,%zu,%zu,%u",
 //                  active_block_id,total_tuple_count,default_active_block_count_,table_id);
-=======
-        // get the last version block.
-        auto table_version_blocks = active_version_blocks_[table_id];
-        version_block = table_version_blocks[active_block_id];
->>>>>>> c894662c7685a0e3126ab6459b479013d826c6ea
 
         tuple == nullptr ? tuple_data = nullptr : tuple_data = tuple->GetData();
         tupleHeader = version_block->InsertTuple(tuple_data);
@@ -725,7 +719,7 @@ LSN_T VersionStore::LogRecordPersist(LogRecord *entry, char **data_ptr) {
 //    LOG_DEBUG("log record persist table id: %u , %u", table_id, active_block_id);
 
     while (true) {
-        // get the last version block.
+        // get the last tile group.
         LOG_DEBUG("log record persist table id: %u , %zu", table_id, active_block_id);
         version_block = log_active_version_blocks_[active_block_id];
 

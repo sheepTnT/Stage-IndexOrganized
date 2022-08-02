@@ -46,10 +46,6 @@ public:
 
     /**
      * @brief      Gets the instance.
-<<<<<<< HEAD
-=======
-     *
->>>>>>> c894662c7685a0e3126ab6459b479013d826c6ea
      * @return     The instance.
      */
     static SSNTransactionManager *GetInstance();
@@ -66,7 +62,7 @@ public:
     }
 
     /**
-     * Test whether the current transaction is the owner of this record.
+     * Test whether the current transaction is the owner of this tuple.
      *
      * @param      current_txn        The current transaction
      * @param[in]  accessor           The record meta
@@ -112,15 +108,11 @@ public:
 
     txn_id_t GetCurrentTidCounter();
     txn_id_t GetNextCurrentTidCounter();
-<<<<<<< HEAD
     void CleanTxnOverwrittenBuffer(TransactionContext *const current_txn);
     /**
      * @brief      Ends a transaction.
      * @param      current_txn  The current transaction
      */
-=======
-
->>>>>>> c894662c7685a0e3126ab6459b479013d826c6ea
     void EndTransaction(TransactionContext *current_txn);
 
     virtual ResultType CommitTransaction(TransactionContext *const current_txn);
@@ -144,13 +136,8 @@ private:
     static IsolationLevelType isolation_level_;
     bool inited = false;
     //transaction undo buffer pool
-<<<<<<< HEAD
     //hold the overeritten record versions
     EphemeralPool *overwritten_buffer_pool;
-=======
-    //hold the overwritten record versions
-    EphemeralPool *conflict_buffer_pool;
->>>>>>> c894662c7685a0e3126ab6459b479013d826c6ea
     SpinLatch latch_;
 
 };

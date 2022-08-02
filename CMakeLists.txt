@@ -165,7 +165,7 @@ include_directories("${PROJECT_SOURCE_DIR}/include"
 set(MV_STORE_SRC_FILES src/common/catalog.cpp src/common/coding.cpp src/common/concurrent_queue.cpp src/common/crc32c.cpp
         src/common/cuckoo_map.cpp src/common/env.cpp src/common/ephemeral_pool.cpp src/common/ephemeral_pool.cpp src/common/manager.cpp
         src/common/random.cpp src/common/raw_atomics.cpp src/common/status.cpp src/concurrency/transaction_context.cpp
-        src/concurrency/transaction_manager.cpp src/vstore/b_tree.cpp src/vstore/log_io.cpp src/vstore/logging.cpp
+        src/concurrency/transaction_manager.cpp src/vstore/b_tree.cpp 
         src/vstore/version_store.cpp misc/murmur/MurmurHash2.cpp)
 set(YCSB_SRC_FILES benchmark/ycsb/ycsb.cpp benchmark/ycsb/ycsb_configuration.cpp benchmark/ycsb/ycsb_loader.cpp
         benchmark/ycsb/ycsb_mixed.cpp benchmark/ycsb/ycsb_workload.cpp)

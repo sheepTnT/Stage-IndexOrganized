@@ -27,7 +27,7 @@ void Usage(FILE *out) {
           //"   -J --wal_path          :  logging directory\n"
 //          "   -U --warmup_duration   :  warmup duration(s)\n"
           "   -s --shuffle_keys      :  whether to shuffle keys at startup (Default: fasle)\n"
-          "   -r --random_mode       :  whether key is random distribution access\n"
+          "   -r --random_mode       :  whether key is random\n"
           "   -m --string_mode       :  whether key is string\n"
           "   -n --scan_mode         :  whether scan only workload\n"
   );
