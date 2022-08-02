@@ -174,11 +174,11 @@ public:
 
   ~EphemeralPool();
 
-  uint64_t Allocate(char *header, char *src_rcd, uint64_t next_tuple,
+  std::pair<uint32_t, uint64_t>  Allocate(char *header, char *src_rcd, uint64_t next_tuple,
                     uint16_t padd_key_len,
                     uint32_t payload_size, const cid_t cstamp, const cid_t pstamp);
 
-  void Free(uint64_t ptr )  ;
+  bool Free( uint32_t buffer_index, uint64_t ptr);
 
   cid_t GetPs(uint64_t ptr);
   std::shared_ptr<OverwriteVersionHeader> GetOversionHeader(uint64_t ptr);
@@ -191,8 +191,9 @@ public:
   uint64_t GetNext(uint64_t ptr)  ;
   void SetPre(uint64_t ptr,uint64_t pre_);
   uint64_t GetPre(uint64_t ptr)  ;
-  void AddWriters(uint64_t metaptr_val, cid_t overwriter, cid_t curr);
-  cid_t GetOveriter(uint64_t metaptr_val, cid_t curr);
+//  void AddWriters(uint64_t metaptr_val, cid_t overwriter, cid_t curr);
+//  cid_t GetOveriter(uint64_t metaptr_val, cid_t curr);
+
 
  public:
 //  tbb::concurrent_unordered_map<uint64_t, std::shared_ptr<OverwriteVersionHeader>> locations_;

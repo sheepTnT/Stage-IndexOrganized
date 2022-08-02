@@ -15,7 +15,7 @@
 namespace mvstore {
 
 /**
-* @brief      Class for RC+SSN transaction manager.
+* @brief      Class for (Repeatable read + SSN) transaction manager.
 */
 class SSNTransactionManager {
 public:
@@ -28,13 +28,17 @@ public:
     ~SSNTransactionManager() {}
 
     /**
-     * @brief Returns the minimum id(min_tid) of active transactions in the system.
-     * This id is used in garbage collection of undo segments.
+     * @brief Returns the minimum id(min_tid) read_id of active transactions in the system.
+     * This id is used in garbage collection of txn info ,retired versions and overwritten versions.
      * All tuples whose end_ts < min_tid are considered garbage and can be safely
      * purged from the system.
      * @return The minimum active transaction id in the system.
      */
-    txn_id_t MinActiveTID();
+    cid_t MinActiveTID();
+
+    TransactionContext *GetTransactionContext(const txn_id_t tid);
+
+    bool EraseTid(const txn_id_t tid);
 
     cid_t FindMaxPstamp(TransactionContext *const current_txn);
 
@@ -42,11 +46,6 @@ public:
 
     /**
      * @brief      Gets the instance.
-     *
-     * @param[in]  protocol   The protocol
-     * @param[in]  isolation  The isolation
-     * @param[in]  conflict   The conflict
-     *
      * @return     The instance.
      */
     static SSNTransactionManager *GetInstance();
@@ -56,7 +55,7 @@ public:
 
     Status Init(EphemeralPool *buffer_pool) {
         if (inited == false) {
-            conflict_buffer_pool = buffer_pool;
+            overwritten_buffer_pool = buffer_pool;
         }
         inited = true;
         return Status::OK();
@@ -66,18 +65,16 @@ public:
      * Test whether the current transaction is the owner of this tuple.
      *
      * @param      current_txn        The current transaction
-     * @param[in]  tile_group_header  The tile group header
-     * @param[in]  tuple_id           The tuple identifier
+     * @param[in]  accessor           The record meta
      *
      * @return     True if owner, False otherwise.
      */
-    virtual bool IsOwner(
-            TransactionContext *const current_txn,
-            RecordMeta &accessor);
+    virtual bool IsOwner(TransactionContext *const current_txn,
+                         RecordMeta &accessor);
 
     /**
      * @param      current_txn        The current transaction
-     * @param[in]  location         The location
+     * @param[in]  location           The location
      */
     virtual bool PerformInsert(TransactionContext *const current_txn,
                                RecordMeta &location);
@@ -111,6 +108,7 @@ public:
 
     txn_id_t GetCurrentTidCounter();
     txn_id_t GetNextCurrentTidCounter();
+    void CleanTxnOverwrittenBuffer(TransactionContext *const current_txn);
     /**
      * @brief      Ends a transaction.
      * @param      current_txn  The current transaction
@@ -138,7 +136,8 @@ private:
     static IsolationLevelType isolation_level_;
     bool inited = false;
     //transaction undo buffer pool
-    EphemeralPool *conflict_buffer_pool;
+    //hold the overeritten record versions
+    EphemeralPool *overwritten_buffer_pool;
     SpinLatch latch_;
 
 };

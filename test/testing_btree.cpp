@@ -345,7 +345,8 @@ protected:
             btree->Insert(key.c_str(), key.length(), reinterpret_cast<const char *>(&delta),
                           &inrt_meta,
                           txn_conxt->GetCommitId() );
-            btree->FinalizeInsert(inrt_meta.GetMetaPtr(), txn_conxt->GetCommitId());
+            RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(inrt_meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+            btree->FinalizeInsert(meta_ptr, txn_conxt->GetCommitId());
         }
 
     }
@@ -404,7 +405,8 @@ TEST_F(BTreeTest, Insert) {
                                 txn_conxt->GetCommitId() );
 
         ASSERT_TRUE(rc.IsOk());
-        btree->FinalizeInsert(inrt_meta.GetMetaPtr(), txn_conxt->GetCommitId());
+        RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(inrt_meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+        btree->FinalizeInsert(meta_ptr, txn_conxt->GetCommitId());
 
         uint64_t payload = 0;
         rcd = btree->Read(key.c_str(), (uint16_t)key.length(),
@@ -498,7 +500,8 @@ TEST_F(BTreeTest, Update) {
     assert(payload == 20);
 
     //not-in-inserting
-    btree->FinalizeUpdate(meta_upt.GetMetaPtr(), txn_conxt->GetCommitId());
+    RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(meta_upt.GetMetaData().GetLocationPtr()->record_meta_ptr);
+    btree->FinalizeUpdate(meta_ptr, txn_conxt->GetCommitId());
     txn_conxt->SetCommitId(5006);
     key = std::to_string(20);
     rcd_1 = btree->Read(key.c_str(), 2,
@@ -531,7 +534,9 @@ TEST_F(BTreeTest, Upsert) {
                   colms, &meta_upti,
                   false,
                               txn_conxt->GetCommitId() );
-    btree->FinalizeInsert(meta_upti.GetMetaPtr(), txn_conxt->GetCommitId());
+    RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(
+            meta_upti.GetMetaData().GetLocationPtr()->record_meta_ptr);
+    btree->FinalizeInsert(meta_ptr, txn_conxt->GetCommitId());
 
     key = "abc";
     rcd_upinr_0 = btree->Read(key.c_str(), 3,
@@ -560,7 +565,8 @@ TEST_F(BTreeTest, Upsert) {
     payload_1 = *reinterpret_cast<uint64_t *>(rcd_upinr_1->GetPayload());
     assert(payload_1 == 20);
     //not-in-inserting
-    btree->FinalizeUpdate(meta_upti.GetMetaPtr(), txn_conxt->GetCommitId());
+    meta_ptr = reinterpret_cast<RecordMetadata *>(meta_upti.GetMetaData().GetLocationPtr()->record_meta_ptr);
+    btree->FinalizeUpdate(meta_ptr, txn_conxt->GetCommitId());
     txn_conxt->SetCommitId(6002);
     key = std::to_string(20);
     rcd_upinr_1 = btree->Read(key.c_str(), 2,
@@ -589,7 +595,9 @@ TEST_F(BTreeTest, Delete) {
                                  &inrt_meta,
                                  txn_conxt->GetCommitId() );
         ASSERT_TRUE(ret.IsOk());
-        btree->FinalizeInsert(inrt_meta.GetMetaPtr(), txn_conxt->GetCommitId());
+        RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(
+                inrt_meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+        btree->FinalizeInsert(meta_ptr, txn_conxt->GetCommitId());
     }
 
     RecordMeta del_meta;
@@ -600,7 +608,9 @@ TEST_F(BTreeTest, Delete) {
                                       false,
                                       txn_conxt->GetCommitId() );
         ASSERT_TRUE(rc.IsOk());
-        btree->FinalizeDelete(del_meta.GetMetaPtr(), txn_conxt->GetCommitId());
+        RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(
+                del_meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+        btree->FinalizeDelete(meta_ptr, txn_conxt->GetCommitId());
         //not-inserting
         txn_conxt->SetCommitId(7003);
         std::unique_ptr<Record> rcd =  btree->Read(key.c_str(), key.length(),
@@ -629,7 +639,9 @@ TEST_F(BTreeTest, RangeScanBySize) {
                                  reinterpret_cast<const char *>(&delta),
                      &record_meta, txn_conxt->GetCommitId() );
         ASSERT_TRUE(ret.IsOk());
-        btree->FinalizeInsert(record_meta.GetMetaPtr(), txn_conxt->GetCommitId());
+        RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(
+                record_meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+        btree->FinalizeInsert(meta_ptr, txn_conxt->GetCommitId());
     }
 
     auto iter = btree->RangeScanBySize("9000", 4, 100);

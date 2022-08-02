@@ -211,7 +211,7 @@ TEST_F(VersionStoreTest, VersionSStoreTest) {
     auto  get_hd_elm_5 = tuple1_header->GetTupleSlot();
     auto  get_hd_elm_8 = tuple1_header->GetHdId( );
 
-    auto total_count_ = version_store->GetTotalCount();
+    auto total_count_ = version_store->GetTotalCount(schema1->table_id);
     EXPECT_EQ(3, total_count_);
 }
 void VersionStoreInsert(VersionStore *version_store,
@@ -255,7 +255,7 @@ TEST_F(VersionStoreTest, StressTest) {
 
     LaunchParallelTest(6, VersionStoreInsert, version_store, schema1.get());
 
-    auto total_count_ = version_store->GetTotalCount();
+    auto total_count_ = version_store->GetTotalCount(schema1->table_id);
     EXPECT_EQ(6000, total_count_);
 }
 

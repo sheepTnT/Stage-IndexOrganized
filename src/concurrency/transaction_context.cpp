@@ -31,7 +31,13 @@ TransactionContext::TransactionContext(const size_t thread_id,
 }
 
 TransactionContext::~TransactionContext() {
+    //delete the rw
     rw_set_.clear();
+
+    //delete the redo log record
+    for (auto l_r_:log_record_buffer){
+        delete l_r_;
+    }
     log_record_buffer.clear();
 }
 
@@ -138,15 +144,15 @@ void TransactionContext::RecordInsert(const RecordMeta &location) {
     if (it != rw_set_.end()) {
         rw_type = it->second;
         auto itr_meta = it->first;
-        char *k_rhs = reinterpret_cast<char *>(itr_meta.GetNodePtr()) +
-                reinterpret_cast<RecordMetadata *>(itr_meta.meta_ptr)->GetOffset();
-        uint64_t key_rhs = *reinterpret_cast<const uint64_t *>(k_rhs);
-
-        char *k_  = reinterpret_cast<char *>(location.GetNodePtr()) +
-                      reinterpret_cast<RecordMetadata *>(location.meta_ptr)->GetOffset();
-        uint64_t key_  = *reinterpret_cast<const uint64_t *>(k_);
-        LOG_DEBUG("txn insert, itr key: %lu, curr key: %lu", key_rhs, key_);
-//        assert(false);
+//        char *k_rhs = reinterpret_cast<char *>(itr_meta.GetNodePtr()) +
+//                reinterpret_cast<RecordMetadata *>(itr_meta.meta_ptr)->GetOffset();
+//        uint64_t key_rhs = *reinterpret_cast<const uint64_t *>(k_rhs);
+//
+//        char *k_  = reinterpret_cast<char *>(location.GetNodePtr()) +
+//                      reinterpret_cast<RecordMetadata *>(location.meta_ptr)->GetOffset();
+//        uint64_t key_  = *reinterpret_cast<const uint64_t *>(k_);
+//        LOG_DEBUG("txn insert, itr key: %lu, curr key: %lu", key_rhs, key_);
+        assert(false);
     } else {
         rw_set_.insert(std::make_pair(location, RWType::INSERT));
         ++insert_count_;
@@ -185,7 +191,6 @@ bool TransactionContext::RecordDelete(const RecordMeta &location) {
     }
 
 }
-
 
 const std::string TransactionContext::GetInfo() const {
     return "";

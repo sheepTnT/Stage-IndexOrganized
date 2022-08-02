@@ -21,7 +21,7 @@ struct RecordMetaHasher {
 };
 using callback_fn = void (*)(void *);
 //record the read write version cstamp
-typedef std::unordered_map<RecordMeta, RWType, RecordMetaHasher> ReadWriteSet;
+typedef tbb::concurrent_unordered_map<RecordMeta, RWType, RecordMetaHasher> ReadWriteSet;
 
 /**
 * @brief      Class for transaction context.
@@ -178,6 +178,12 @@ public:
     inline void ClearLogRecords(){
         log_record_buffer.clear();
     }
+    inline void BufferOverwrittenVersion(uint64_t location){
+        overwritten_buffer.push_back(location);
+    }
+    inline std::vector<uint64_t> &GetOverwrittenBuffer(){
+        return overwritten_buffer;
+    }
 
 private:
     /** transaction id */
@@ -229,7 +235,10 @@ private:
     //if update many times, just only record the last one
     std::map<oid_t, std::pair<RWType,LSN_T>> last_log_rec_lsn;
     std::atomic<uint16_t> count;
+    //for redo
     std::vector<LogRecord *> log_record_buffer;
+    //for undo
+    std::vector<uint64_t> overwritten_buffer;
 };
 
 }

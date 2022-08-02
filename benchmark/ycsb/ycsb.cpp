@@ -39,7 +39,7 @@ void RunBenchmark() {
     VersionStore *version_store;
     DramBlockPool *leaf_node_pool;
     InnerNodeBuffer *inner_node_pool;
-    EphemeralPool *conflict_buffer;
+    EphemeralPool *overwritten_buffer;
 
     //Version Block Manager
     version_block_mng = VersionBlockManager::GetInstance();
@@ -55,15 +55,15 @@ void RunBenchmark() {
     //for undo buffer
     RecordBufferPool *buffer_pool = new RecordBufferPool(50000000000,50000000000);
     UndoBuffer *undo_buffer_pool = new UndoBuffer(buffer_pool);
-    conflict_buffer = new EphemeralPool(undo_buffer_pool);
+    overwritten_buffer = new EphemeralPool(undo_buffer_pool);
     //initialize the transaction's undo buffer
     SSNTransactionManager *transaction_manager = SSNTransactionManager::GetInstance();
-    transaction_manager->Init(conflict_buffer);
+    transaction_manager->Init(overwritten_buffer);
 
     PELOTON_ASSERT(leaf_node_pool, "leaf_node_pool new fail.");
     PELOTON_ASSERT(inner_node_pool, "inner_node_pool new fail.");
     PELOTON_ASSERT(undo_buffer_pool, "undo_buffer_pool new fail.");
-    PELOTON_ASSERT(conflict_buffer, "conflict_buffer new fail.");
+    PELOTON_ASSERT(overwritten_buffer, "conflict_buffer new fail.");
     PELOTON_ASSERT(version_store,"version_store get instance fail.");
 
     ParameterSet param(64*1024, 32*1024,64*1024,100*10);
@@ -74,7 +74,7 @@ void RunBenchmark() {
     LOG_INFO("Loading database from scratch");
 
     //Create the database, initialize the version store
-    CreateYCSBDatabase(param, version_store, leaf_node_pool, inner_node_pool, conflict_buffer);
+    CreateYCSBDatabase(param, version_store, leaf_node_pool, inner_node_pool, overwritten_buffer);
 
     //Load the database
     LoadYCSBDatabase(version_store);

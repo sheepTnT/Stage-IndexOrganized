@@ -39,7 +39,15 @@ public:
             // RetOk/RetKeyExists, record rw_set
             transaction_manager->PerformInsert(txn_ctx, meta);
             //Log Record
-            payload_location = reinterpret_cast<const char *>(meta.meta_ptr);
+//            payload_location = reinterpret_cast<const char *>(meta.meta_ptr);
+            RecordLocation *meta_location = meta.meta_data.GetLocationPtr();
+            uint64_t meta_ptr = meta_location->record_meta_ptr;
+            uint64_t node_hd_ptr = meta_location->node_header_ptr;
+            void *meta_ptr_ = reinterpret_cast<void *>(meta_ptr);
+            void *node_hd_ptr_ = reinterpret_cast<void *>(node_hd_ptr);
+            auto node_location = reinterpret_cast<char *>(node_hd_ptr_) - 1;
+            payload_location = node_location + (reinterpret_cast<RecordMetadata *>(meta_ptr_))->GetOffset();
+
             LogManager *log_mng = LogManager::GetInstance();
             if(log_mng->IsLogStart()){
                 LogRecord *lg_rcd = log_mng->LogInsert(txn_ctx->GetTransactionId(), payload_location,
@@ -53,7 +61,7 @@ public:
         }else if(insert_res.IsKeyExists()){
 //            std::string k_str = reinterpret_cast<const char *>(k_);
             std::string table_name = data_table->schema.table_name;
-            LOG_TRACE("btree insert, key has already exists, table name: %s", table_name.c_str());
+            LOG_DEBUG("btree insert, key has already exists, table name: %s", table_name.c_str());
         }else if(insert_res.IsCASFailure()){
 //            LOG_INFO("btree insert, CAS failure , key: %lu",k_);
             ret_code = ReturnCode::CASFailure();
@@ -198,7 +206,7 @@ public:
         const char *tuple_data = delta_tuple;
         bool up_ret = true;
         auto txn_id = txn_ctx->GetReadId();
-        int retry_count = 0;
+//        int retry_count = 0;
         oid_t table_id = data_table->GetTableSchema().table_id;
 
         RecordMeta meta_upt;
@@ -250,9 +258,10 @@ public:
                 std::pair<oid_t, TupleHeader *> tuple_header = buf_mgr->AcquireVersion(&data_table->schema);
                 auto tpl_hd = tuple_header.second;
                 if(tpl_hd == nullptr){
-                    LOG_TRACE("tuple header is null.");
+                  LOG_DEBUG("update, tuple header is null.");
                   return false;
                 }
+                tpl_hd->SetTableId(data_table->GetTableSchema().table_id);
 
                 up_ret = transaction_manager->PerformUpdate(txn_ctx, meta_upt, tpl_hd);
 
@@ -274,6 +283,7 @@ public:
                         txn_ctx->LogRecordToBuffer(lg_rcd);
                     }
                 }else{
+                    LOG_DEBUG("update, transaction fail.");
                     failed = true;
                 }
             }
@@ -281,9 +291,9 @@ public:
         }else if(update_res.IsNotFound()){
             // transaction failure, maybe key produce randomly
             std::string table_name = data_table->GetTableSchema().table_name;
-            LOG_TRACE("btree update, key has not exists, table name: %s",table_name.c_str());
+            LOG_DEBUG("btree update, key has not exists, table name: %s",table_name.c_str());
         }else{
-            LOG_TRACE("btree update fail, %d.",update_res.rc);
+            LOG_DEBUG("btree update fail, %d.",update_res.rc);
             failed = true;
         }
 
@@ -370,6 +380,8 @@ public:
                         //<key,payload(Tuple)>
                         results.push_back(data_);
                         current_record.release();
+                    }else{
+                        failed = true;
                     }
                 } else{
                     auto next_ptr_ = current_record->meta.next_tuple_ptr;
@@ -410,8 +422,12 @@ public:
                                 }
                             }
                         }
+                    } else{
+                        LOG_DEBUG("there is no retiring version, table name: %s", data_table->schema.table_name);
                     }
                 }
+            } else{
+                LOG_DEBUG("there is no active version, table name: %s", data_table->schema.table_name);
             }
         } else {
             iter = data_table->RangeScanBySize(k_, key_size, scan_size);

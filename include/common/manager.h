@@ -46,6 +46,13 @@ class Manager {
   void AddIndirectionArray(const oid_t oid,
                            std::shared_ptr<IndirectionArray> location);
 
+  oid_t GetNextRecordIndirectionArrayId() { return ++record_indirection_array_oid_; }
+
+  oid_t GetCurrentRecordIndirectionArrayId() { return record_indirection_array_oid_; }
+
+  void AddRecordIndirectionArray(const oid_t oid,
+                         std::shared_ptr<RecordIndirectionArray> location);
+
   void DropIndirectionArray(const oid_t oid);
 
   void ClearIndirectionArray();
@@ -58,11 +65,12 @@ class Manager {
   // Data members for indirection array allocation
   //===--------------------------------------------------------------------===//
   std::atomic<oid_t> indirection_array_oid_ = ATOMIC_VAR_INIT(START_OID);
-
-  tbb::concurrent_unordered_map<oid_t,
-                                std::shared_ptr<IndirectionArray>>
-      indirection_array_locator_;
+  tbb::concurrent_unordered_map<oid_t, std::shared_ptr<IndirectionArray>> indirection_array_locator_;
   static std::shared_ptr<IndirectionArray> empty_indirection_array_;
+
+  std::atomic<oid_t> record_indirection_array_oid_ = ATOMIC_VAR_INIT(START_OID);
+  tbb::concurrent_unordered_map<oid_t, std::shared_ptr<RecordIndirectionArray>> record_indirection_array_locator_;
+  static std::shared_ptr<RecordIndirectionArray> record_empty_indirection_array_;
 };
 
 }

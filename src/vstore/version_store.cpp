@@ -4,8 +4,10 @@
 
 #include <sys/mman.h>
 #include <memory>
+#include <execute/txn.h>
 #include "../include/vstore/version_store.h"
 #include "../include/common/env.h"
+#include "../include/common/mono_queue_pool.h"
 
 namespace mvstore{
 
@@ -18,6 +20,7 @@ static const std::string heapfile_path_ = "/mnt/pmem5/heapfile";
 size_t num_nvm_blocks_ = (nvm_block_cap_in_bytes/NVM_BLOCK_SIZE) * 1;
 
 static int clean_thread_count_ = 1;
+static std::unordered_map<oid_t, tbb::concurrent_queue<FreeBlockSlot>> local_available_;
 
 void BaseTuple::SetValue(oid_t column_id, const char *value) const {
     uint32_t value_size = tuple_schema_->_columns[column_id].size;
@@ -56,7 +59,9 @@ bool BaseTuple::operator!=(const BaseTuple &other) const {
  */
 TupleHeader *VersionBlock::InsertTuple(const char *tuple_data) {
     auto block_meta = GetBlockMeta();
-    if (block_meta == nullptr) {return nullptr;}
+    if (block_meta == nullptr) {
+        return nullptr;
+    }
 
     oid_t tuple_slot_id = block_meta->GetNextEmptyTupleSlot();
 
@@ -65,7 +70,7 @@ TupleHeader *VersionBlock::InsertTuple(const char *tuple_data) {
 
     // No more slots
     if (tuple_slot_id == INVALID_OID) {
-        LOG_TRACE("Failed to get next empty tuple slot within current version block.");
+        LOG_DEBUG("Failed to get next empty tuple slot within current version block.");
         return nullptr;
     }
 
@@ -150,7 +155,7 @@ VersionBlockManager::~VersionBlockManager() {
     blocks_queue.Clear();
 };
 
-// Get instance of the global catalog storage manager
+// Get instance of the global version storage manager
 VersionBlockManager *VersionBlockManager::GetInstance() {
     static VersionBlockManager global_version_store_manager;
     return &global_version_store_manager;
@@ -270,10 +275,13 @@ Status VersionBlockManager::Init() {
 
 
     //clean the version blocks
-    local_clean_set_ = std::make_shared<GCSet>();
+    local_retired_set_ = std::make_shared<VCSet>();
 
     return Status::OK();
 }
+/**
+ *
+ */
 void VersionBlockManager::DeallocateNVMSpace(){
     size_t filesize = num_nvm_blocks_ * NVM_BLOCK_SIZE;
     // NOTE: Only unmap memory here because we need to access the mapping
@@ -290,7 +298,10 @@ void VersionBlockManager::DeallocateNVMSpace(){
     }
 
 }
-
+/**
+ *
+ * @return
+ */
 VersionBlockElem VersionBlockManager::AllocateBlock() {
     VersionBlockElem version_block_elem;
 //    LOG_DEBUG("current block array size:%lu",version_block_array_.size() );
@@ -305,6 +316,10 @@ VersionBlockElem VersionBlockManager::AllocateBlock() {
 
     return version_block_elem;
 }
+/**
+ *
+ * @return
+ */
 VersionBlockElem VersionBlockManager::AllocateLogBlock() {
     VersionBlockElem version_block_elem;
 //    LOG_DEBUG("current block array size:%lu",version_block_array_.size() );
@@ -331,16 +346,20 @@ VersionBlockElem VersionBlockManager::AllocateLogBlock() {
 
     return version_block_elem;
 }
-
+/**
+ *
+ * @param location
+ */
 void VersionBlockManager::AddVersionBlock(std::shared_ptr<VersionBlock> location) {
-    // add/update the catalog reference to the tile group
     lock_.Lock();
     version_block_array_.push_back(location);
     lock_.Unlock();
 }
-
+/**
+ *
+ * @param location
+ */
 void VersionBlockManager::DropVersionBlock(std::shared_ptr<VersionBlock> location) {
-    // drop the catalog reference to the tile group
     for (version_block_iterator_ = version_block_array_.begin();
                 version_block_iterator_ != version_block_array_.end();){
         if(*version_block_iterator_ == location){
@@ -381,96 +400,93 @@ void VersionBlockManager::DeallocateBlock(void *p) {
     int pos = pointer_diff / NVM_BLOCK_SIZE;
     bitmaps.Clear(pos);
 }
-
-int VersionBlockManager::CollectOldVersionSet(const cid_t min_active_id){
-    lock_.Lock();
-//    std::vector<TxnVersionInfo> txn_gc_set;
-//    auto ret = local_clean_set_->Find(min_active_id,txn_gc_set);
+/**
+ * one backend thread pin to core to collect the candidate tuple slot
+ * these tuple slot are the retired versions
+ * @param min_active_id
+ * @return
+ */
+int VersionBlockManager::CollectRetiredVersionSet(const cid_t min_active_id){
+    std::vector<TxnVersionInfo> gc_set_txn;
     int collect_count = 0;
-//    auto gc_set = local_clean_set_.get();
-//    for(auto cuck_itr = gc_set->GetIterator() : ){
-//        //thread id, has the txn id < min active id
-//        if(cuck_itr.first <= min_active_id){
-//            //traverse the txn gc set
-//            txn_gc_set = cuck_itr.second;
-//            if(!txn_gc_set.empty()){
-//                for(const auto & iter : txn_gc_set){
-//
-//                    FreeBlockSlot f_s_l = std::make_shared<TxnVersionInfo>( TxnVersionInfo
-//                                                                                    {iter.table_id,iter.block_ptr, iter.tuple_header,
-//                                                                                     iter.tuple_header_size, iter.version_type});
-//
-//                    local_candidate_available_[thread_id]->push(std::move(f_s_l));
-//
-//                    collect_count++;
-//                }
-//            }
-//
-//            txn_gc_set.clear();
-//            ExitCleaner(thread_id, cuck_itr.first);
-//        }
-//    }
-//
-//
-//    txn_gc_set.clear();
-//    lock_.Unlock();
+    auto gc_set_itr = local_retired_set_->GetIterator();
+    for(auto &cuck_itr : gc_set_itr){
+        //thread id, has the txn id < min active id
+        oid_t txn_commit_id = cuck_itr.first;
+        if(txn_commit_id < min_active_id){
+            //1.traverse the txn gc set(retired version slots)
+            gc_set_txn = cuck_itr.second;
+            if(!gc_set_txn.empty()){
+                for(const auto &iter : gc_set_txn){
+                    FreeBlockSlot f_s_l = std::make_shared<TxnVersionInfo>(TxnVersionInfo{iter.table_id,
+                              iter.tuple_header, iter.tuple_header_size, iter.version_type});
+
+                    collect_count++;
+
+                    local_candidate_available_.push(std::move(f_s_l));
+                }
+            }
+
+            auto transaction_manager = SSNTransactionManager::GetInstance();
+            auto txn_info = transaction_manager->GetTransactionContext(txn_commit_id);
+            //2.erase the overwritten buffer item and free the location
+            transaction_manager->CleanTxnOverwrittenBuffer(txn_info);
+            //3.delete the txn context info of the commit id
+            delete txn_info;
+            txn_info = nullptr;
+            //4.delete item from the active id sets
+            bool rt = transaction_manager->EraseTid(txn_commit_id);
+            LOG_DEBUG("delete from the active id sets result: %d", rt);
+            //5.after collect, clear the slot set of the commit id
+            gc_set_txn.clear();
+            //current transaction exits from local cleaner
+            local_retired_set_->Erase(txn_commit_id);
+        }
+    }
 
     return collect_count;
 }
-int VersionBlockManager::CleanCandidateSlot(const int thread_id){
-    int clean_count = 0 ;
-    if(!local_candidate_available_.empty()){
-        auto candidate_queue = local_candidate_available_[thread_id].get();
-        while(!candidate_queue->empty()) {
-            auto elem = candidate_queue->front();
-            // reset the tuple header of the slot,
-            // and slot data will be overwritten.
-            auto tpl_hd = reinterpret_cast<TupleHeader *>(elem->tuple_header);
-            tpl_hd->free(elem->tuple_header_size);
-
-            tpl_hd->reset();
-
-            local_available_[elem->table_id].push(elem);
-
-            candidate_queue->pop();
-
-            clean_count++;
-        }
-    }
-    return clean_count;
-}
 /**
- *
- * @param thread_id current txn thread id
- * @param end_commit_id txn commit id
- * @param gc_type update/delete commit, or insert/update/abort
- * @param physical_location recordmmeta or tupleheader location
- * @param tuple_hd_size recordmeta or tupleheader
- * @param table_id
- * @param block_location record or tuple 's block location
+ * work thread pool to free the tuple slot of version store
+ * this pool has backend number of work threads
+ * @param thread_id
+ * @return
  */
-void VersionBlockManager::EnterCleaner(const cid_t end_commit_id,
-                   const GCVersionType gc_type, void *physical_location,
-                   uint32_t tuple_hd_size, oid_t table_id, uint64_t block_location) {
-    std::vector<TxnVersionInfo> txn_set;
+void VersionBlockManager::CleanCandidateSlot(std::shared_ptr<TxnVersionInfo> &elem,
+                                       const std::function<void(int count)>& on_complete){
+    int clean_count = 0 ;
+    // reset the tuple header of the slot,
+    auto tpl_hd = reinterpret_cast<TupleHeader *>(elem->tuple_header);
 
-    auto ret =  local_clean_set_->Find(end_commit_id,txn_set);
-    if(ret){
-      txn_set.push_back({table_id,block_location, physical_location, tuple_hd_size, gc_type}) ;
-    }else{
-        txn_set.push_back({table_id,block_location, physical_location, tuple_hd_size, gc_type});
-        local_clean_set_->Insert(end_commit_id,txn_set);
-    }
+    tpl_hd->reset();
+
+    local_available_[elem->table_id].push(elem);
+
+    clean_count++;
+
+    on_complete(clean_count);
 }
-void VersionBlockManager::ExitCleaner(const cid_t end_commit_id){
-    local_clean_set_->Erase(end_commit_id);
+
+FreeBlockSlot VersionBlockManager::GetFreeSlot(oid_t table_id){
+    if (local_available_.size() <=0 ){return nullptr;}
+    tbb::concurrent_queue<FreeBlockSlot> f_b_ss = local_available_[table_id];
+    if (f_b_ss.empty()){return nullptr;}
+    FreeBlockSlot f_b_s;
+
+    f_b_ss.try_pop(f_b_s);
+    return f_b_s;
 }
+
 //==========================================================
 //----------------------------VersionStore------------------
 //==========================================================
 VersionStore::VersionStore() = default;
 
-VersionStore::~VersionStore() = default;
+VersionStore::~VersionStore() {
+    for (int i = 0; i < retir_active_version_blocks_.size(); ++i) {
+        retir_active_version_blocks_.erase(i);
+    }
+};
 
 VersionStore *VersionStore::GetInstance() {
     static VersionStore global_version_store_;
@@ -480,30 +496,30 @@ VersionStore *VersionStore::GetInstance() {
  * initialize the version store with catalog list
  * @param catalog_list
  */
-Status VersionStore::Init(std::vector<Catalog *> catalog_list) {
+Status VersionStore::Init(std::vector<Catalog *> &catalog_list) {
     //inialize the user table, log table
-    for (auto & i : catalog_list) {
-        auto catalog_ = i;
+    for (int i=0; i<catalog_list.size(); ++i) {
+        const auto catalog_ = catalog_list[i];
         auto table_id = catalog_->table_id;
         LOG_DEBUG("initialize version store, table id: %u",table_id);
 
-        active_version_blocks_[table_id].resize(default_active_block_count_);
         if (catalog_->is_log){
+            log_active_version_blocks_.reserve(default_active_block_count_);
             log_manager = LogManager::GetInstance();
-            log_manager->LogCatalog(i);
+            log_manager->LogCatalog(catalog_);
             for(size_t j = 0; j < default_active_block_count_; ++j){
                 //initialize the default version block for log record
-                AddDefaultBlockToManager(i, j, true);
+                AddDefaultBlockToManager(catalog_, j, true);
             }
         }else{
             for(size_t j = 0; j < default_active_block_count_; ++j){
                 //initialize the default version block for tuple version record
-                AddDefaultBlockToManager(i, j, false);
+                AddDefaultBlockToManager(catalog_, j, false);
             }
+            total_count[table_id] = 0;
         }
     }
-
-    total_count = 0;
+//    total_count = 0;
 
     return Status::OK();
 }
@@ -543,7 +559,7 @@ oid_t VersionStore::AddDefaultBlockToManager(const Catalog *catalog,
        char *block = nvm_block_.second;
        version_block_.reset(new VersionBlock(version_block_id, &block, catalog));
     }else{
-        //first: Create a version block with envaluate NVM mmap File
+        //first: Create a version block with dram mmap File
         auto nvm_block_ = VersionBlockManager::GetInstance()->AllocateBlock();
         version_block_id = nvm_block_.first;
         char *block = nvm_block_.second;
@@ -558,7 +574,12 @@ oid_t VersionStore::AddDefaultBlockToManager(const Catalog *catalog,
     COMPILER_MEMORY_FENCE;
 
     //second: Add it to the current catalog active version blocks
-    active_version_blocks_[catalog->table_id][active_block_id] = version_block_.get();
+    if(is_log){
+        log_active_version_blocks_[active_block_id] = version_block_.get();
+    }else{
+        retir_active_version_blocks_[table_id][active_block_id] = version_block_.get();
+//        retir_active_version_blocks_[table_id].emplace_back(version_block_.get());
+    }
 
     // we must guarantee that the compiler always add tile group before adding
     COMPILER_MEMORY_FENCE;
@@ -576,6 +597,7 @@ oid_t VersionStore::AddDefaultBlockToManager(const Catalog *catalog,
  */
 TupleHeader *VersionStore::InsertTuple(const BaseTuple *tuple) {
     Catalog *catalog = tuple->GetSchema();
+    oid_t table_id = catalog->table_id;
     auto tuple_location = GetEmptyTupleSlot(catalog,tuple);
     if (tuple_location.second == nullptr) {
         LOG_TRACE("Failed to get tuple slot.");
@@ -584,9 +606,9 @@ TupleHeader *VersionStore::InsertTuple(const BaseTuple *tuple) {
 
     LOG_TRACE("tuple location, header: %p, %p ", tuple_location,  tuple_location->GetSlot());
 
-    IncreaseTupleCount(1);
+    IncreaseTupleCount(table_id,1);
 
-    LOG_DEBUG("version store total tuple count: %u", GetTotalCount());
+    LOG_DEBUG("version store total tuple count of table id: %u , %d", GetTotalCount(table_id), table_id);
 
     return tuple_location.second;
 }
@@ -597,11 +619,14 @@ TupleHeader *VersionStore::InsertTuple(const BaseTuple *tuple) {
  */
 std::pair<oid_t, TupleHeader *> VersionStore::AcquireVersion(Catalog *catalog) {
     // First, claim a slot
+    oid_t table_id = catalog->table_id;
     auto location = GetEmptyTupleSlot(catalog,nullptr);
     if (location.second  == nullptr) {
         LOG_INFO("Failed to get tuple slot.");
         return {};
     }
+
+    IncreaseTupleCount(table_id,1);
 
     LOG_TRACE("tuple location, header: %p, %p ", tuple_location,  tuple_location->GetSlot());
 
@@ -616,6 +641,8 @@ std::pair<oid_t, TupleHeader *> VersionStore::AcquireVersion(Catalog *catalog) {
  */
 std::pair<oid_t,TupleHeader *> VersionStore::GetEmptyTupleSlot(Catalog *catalog,
                                                                const BaseTuple *tuple) {
+    assert(catalog->is_log==false);
+
     //=============== garbage collection==================
     // check if there are recycled tuple slots
     auto version_block_mng = VersionBlockManager::GetInstance();
@@ -628,19 +655,22 @@ std::pair<oid_t,TupleHeader *> VersionStore::GetEmptyTupleSlot(Catalog *catalog,
     }
 
     //====================================================
-    size_t active_block_id = total_count % default_active_block_count_;
+    oid_t table_id = catalog->table_id;
+    uint64_t total_tuple_count = this->GetTotalCount(table_id);
+    size_t active_block_id = total_tuple_count % default_active_block_count_;
     VersionBlock *version_block = nullptr;
     oid_t tuple_slot = INVALID_OID;
     oid_t version_block_id = INVALID_OID;
     TupleHeader *tupleHeader = nullptr;
-    oid_t table_id = catalog->table_id;
     const char *tuple_data;
 
     // get valid tuple.
     while (true) {
         // get the last tile group.
-        auto table_version_blocks = active_version_blocks_[table_id];
-        version_block = table_version_blocks[active_block_id];
+        auto retir_active_version_blocks = retir_active_version_blocks_[table_id];
+        version_block = retir_active_version_blocks[active_block_id];
+//        LOG_DEBUG("active_block_id: %zu,%zu,%zu,%u",
+//                  active_block_id,total_tuple_count,default_active_block_count_,table_id);
 
         tuple == nullptr ? tuple_data = nullptr : tuple_data = tuple->GetData();
         tupleHeader = version_block->InsertTuple(tuple_data);
@@ -657,7 +687,7 @@ std::pair<oid_t,TupleHeader *> VersionStore::GetEmptyTupleSlot(Catalog *catalog,
     // then create a new active version block from manager
     auto block_meta = version_block->GetBlockMeta();
     auto alloc_tuple_count = block_meta->GetTotalTupleCount();
-    if (tuple_slot ==  alloc_tuple_count - 1) {
+    if (tuple_slot ==  (alloc_tuple_count - 1)) {
         AddDefaultBlockToManager(catalog,active_block_id, false);
     }
 
@@ -671,10 +701,10 @@ void VersionStore::CleanVersionStore(){
 //    auto nvm_block_mng_ = VersionBlockManager::GetInstance();
 //    nvm_block_mng_->DeallocateNVMSpace();
 
-    active_version_blocks_.clear();
+    log_active_version_blocks_.clear();
+    retir_active_version_blocks_.clear();
 }
 /**
- *
  * @param rec
  * @return
  */
@@ -691,7 +721,7 @@ LSN_T VersionStore::LogRecordPersist(LogRecord *entry, char **data_ptr) {
     while (true) {
         // get the last tile group.
         LOG_DEBUG("log record persist table id: %u , %zu", table_id, active_block_id);
-        version_block = active_version_blocks_[table_id][active_block_id];
+        version_block = log_active_version_blocks_[active_block_id];
 
         char *buf_start = version_block->GetNextSlot(size,last_lsn);
 
@@ -707,8 +737,8 @@ LSN_T VersionStore::LogRecordPersist(LogRecord *entry, char **data_ptr) {
         }
     }
 
-//    LOG_INFO("version block id: %u, address: %p, tuple header address: %p",
-//              version_block_id, version_block, *data_ptr);
+    LOG_DEBUG("version block id: %u, address: %p, tuple header address: %p",
+              version_block_id, version_block, *data_ptr);
 
     return last_lsn;
 }
@@ -897,41 +927,66 @@ void LogManager::LogWrite(TransactionContext *current_txn,
 
     on_complete(true, current_txn, std::move(rt_lsn));
 }
+
+
+VersionCleaner::VersionCleaner() = default;
+VersionCleaner::~VersionCleaner() = default;
+
+VersionCleaner *VersionCleaner::GetInstance() {
+    static VersionCleaner version_cleaner;
+    return &version_cleaner;
+}
 /**
- * version cleaner
+ * retired version cleaner
  * 1. release the memory for overwritten version buffer
  * 2. clear the retired versions, free the memory for other versions
  * @param cleaner
  */
-void VersionCleaner::CleanVersionsProcessing(const int &thread_id) {
-    constexpr float CYCLES_PER_SEC = 3 * 1024ULL * 1024 * 1024;
-    PELOTON_ASSERT(is_running_,"CleanProcessing is running.");
-    uint32_t backoff_shifts = 0;
+void VersionCleaner::CleanVersionsProcessing(double period_duration) {
+    LOG_DEBUG("Starting version(overwritten/retired) cleaning.");
 
-    while (true) {
+    constexpr float CYCLES_PER_SEC = 3 * 1024ULL * 1024 * 1024;
+    uint32_t backoff_shifts = 0;
+    size_t init_pround = 0;
+    size_t profile_round = (size_t) (period_duration);
+
+
+    while (init_pround < profile_round) {
+        ++init_pround;
         int collect_count = 0;
         int clean_count = 0;
-
         long long cycles = 0;
         {
             ScopedTimer timer([&cycles](unsigned long long c) {cycles += c;});
 
             VersionBlockManager *block_mng = VersionBlockManager::GetInstance();
-            //TODO:transaction minactive id
-//            auto transaction_manager = SnapshotTransactionManager::GetInstance(buf_mgr);
+            //get the transaction minactive id
+            auto transaction_manager = SSNTransactionManager::GetInstance();
+            auto min_active_tid = transaction_manager->MinActiveTID();
 
-//            auto min_active_tid = transaction_manager->MinActiveTID();
-//            collect_count = block_mng->CollectOldVersionSet(thread_id, 0);
+            //collect the candidate retired version slot
+            //and erase the txn info, overwritten buffered versions
+            collect_count = block_mng->CollectRetiredVersionSet(min_active_tid);
 
-            //clean the slot and free the memory space
-            clean_count = block_mng->CleanCandidateSlot(thread_id);
+            //work pool, clean the retired slot and free the memory space
+            auto &pool = MonoQueuePool::GetInstance();
+            auto txn_version_infos = block_mng->GetDeallocatedQueue();
+
+            while(!txn_version_infos.empty()){
+                auto on_complete = [&clean_count](int count) {
+                    clean_count = clean_count + count;
+                };
+
+                std::shared_ptr<mvstore::TxnVersionInfo> elem;
+                txn_version_infos.try_pop(elem);
+                pool.SubmitTask([&elem, on_complete] {
+                    VersionBlockManager::CleanCandidateSlot(elem, on_complete);
+                });
+            }
+
         }
-        LOG_INFO("Clean %d slots, took %lf secs\n", clean_count,
-                                        cycles / (CYCLES_PER_SEC + 0.0));
+        LOG_INFO("Clean %d retired version slots, took %lf secs\n", clean_count, cycles / (CYCLES_PER_SEC + 0.0));
 
-        if (!is_running_) {
-            return;
-        }
         if (collect_count == 0 && clean_count == 0) {
             // sleep at most 0.8192 s
             if (backoff_shifts < 13) {
@@ -944,35 +999,8 @@ void VersionCleaner::CleanVersionsProcessing(const int &thread_id) {
             backoff_shifts >>= 1;
         }
     }
-}
 
-//void VersionCleaner::StartClean()  {
-//    LOG_TRACE("Starting GC");
-//    this->is_running_ = true;
-//    for (int i = 0; i < clean_thread_count_; ++i) {
-//        thread_pool.SubmitDedicatedTask(&VersionCleaner::CleanVersionsProcessing,
-//                                        this,
-//                                        std::move(i));
-//    }
-//}
-//void VersionCleaner::StopClean(){
-//    LOG_TRACE("Stopping version cleaning.");
-//    this->is_running_ = false;
-//    // clear the garbage in each GC thread
-//    for (int thread_id = 0; thread_id < clean_thread_count_; ++thread_id) {
-//        ClearCleans(thread_id);
-//    }
-//}
-void VersionCleaner::ClearCleans(int thread_id){
-    VersionBlockManager *block_mng = VersionBlockManager::GetInstance();
-
-//    int collect_count = block_mng->CollectOldVersionSet(thread_id, MAX_CID);
-
-    //clean the slot and free the memory space
-    int clean_count = block_mng->CleanCandidateSlot(thread_id);
-
-//    LOG_INFO("Collect Old Version set, %d, Clean %d slots. \n", collect_count,  clean_count);
-
+    LOG_DEBUG("Stop version(overwritten/retired) cleaning.");
 }
 
 }

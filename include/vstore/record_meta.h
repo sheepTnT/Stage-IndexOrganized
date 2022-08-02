@@ -31,7 +31,11 @@ struct RecordMetadata{
     //64 bits
     uint64_t meta;
     //64 bits
+    //pointing to the next version, overwritten or retiring
     uint64_t next_ptr;
+    //64 bits
+    //pointing to the location that holds the realtime record meta location
+    RecordLocation *loc_ptr;
 
     ~RecordMetadata() {};
 //    RecordMetadata (const RecordMetadata& x) : meta(x.meta), next_ptr(x.next_ptr) {};  // copy ctor
@@ -42,7 +46,7 @@ struct RecordMetadata{
     }
 
     bool operator==(const RecordMetadata &rhs) const {
-        return meta == rhs.meta && next_ptr == rhs.next_ptr;
+        return meta == rhs.meta && next_ptr == rhs.next_ptr && loc_ptr == rhs.loc_ptr;
     }
 
     bool operator!=(const RecordMetadata &rhs) const {
@@ -50,8 +54,9 @@ struct RecordMetadata{
     }
 
     RecordMetadata() : meta(0),next_ptr(0) {}
-    explicit RecordMetadata(uint64_t meta) : meta(meta), next_ptr(0) {}
-    RecordMetadata(uint64_t meta, uint64_t next) : meta(meta), next_ptr(next) {}
+    explicit RecordMetadata(uint64_t meta) : meta(meta), next_ptr(0), loc_ptr(0) {}
+    RecordMetadata(uint64_t meta, uint64_t next, RecordLocation *location) :
+                                    meta(meta), next_ptr(next), loc_ptr(location) {}
     //1.1-TxnMask inserting, 0-TxnMask not inserting
     //2.1-visible, 0-not visible
     //3.key length
@@ -145,6 +150,13 @@ struct RecordMetadata{
         assert(!IsInserting());
     }
 
+    inline void FinalizeForUpdate() {
+        meta =  (meta & (~kControlMask)) | (kVisibleMask) ;
+
+        assert(!IsInserting());
+        assert(IsVisible());
+    }
+
     inline void FinalizeForRead(uint32_t pstamp) {
         meta = (meta & (~kTxnContextMask)) | pstamp;
         meta = meta & (~kControlMask);
@@ -156,6 +168,7 @@ struct RecordMetadata{
         // Set the transaction commit id
 //        uint64_t commit_id = txn->GetCommitId();
         meta = 0;
+        assert(!IsInserting());
     }
 
     inline void NotInserting() {
@@ -180,6 +193,14 @@ struct RecordMetadata{
         next_ptr = tuple_header;
     }
 
+    inline RecordLocation *GetLocationPtr(){
+        return loc_ptr;
+    }
+
+    inline void SetLocationPtr(RecordLocation *ptr){
+        loc_ptr = ptr;
+    }
+
 };
 
 
@@ -200,29 +221,32 @@ struct CopyRecordMeta {
 };
 
 struct RecordMeta{
-    uint64_t block_ptr;
-    oid_t table_id;
+//    uint64_t block_ptr;
+//    oid_t table_id;
+//    //leaf node header physical location
+//    uint64_t node_header_ptr;
+    //record metadata object
     RecordMetadata meta_data;
-    uint64_t meta_ptr;
-    uint64_t node_header_ptr;
     //key+payload
     uint32_t total_size;
+    //pointing to the next version(retiring version)
     uint64_t next_tuple_ptr;
+    //create timestamp of the record version
+    //active version or overwritten version
     cid_t cstamp;
 
-    RecordMeta():block_ptr(0), table_id(0), meta_ptr(0),
-                node_header_ptr(0), total_size(0),
-                next_tuple_ptr(0), cstamp(0){}
-    RecordMeta(uint64_t block_ptr_, oid_t table_id_, RecordMetadata &meta_data_) :
-            block_ptr(block_ptr_), table_id(table_id_), meta_data(meta_data_.meta),
-            next_tuple_ptr(0),node_header_ptr(0){
-        meta_data.SetNextPointer(meta_data_.next_ptr);
-    }
-    ~RecordMeta()=default;
-    bool operator==(const RecordMeta &rhs) const{
-        bool equal = block_ptr == rhs.block_ptr && table_id == rhs.table_id
-                     && meta_data.meta == rhs.meta_data.meta;
 
+    RecordMeta():total_size(0),next_tuple_ptr(0), cstamp(0){}
+    RecordMeta(RecordMetadata &meta_data_): next_tuple_ptr(0){
+        meta_data.meta = meta_data_.meta;
+        meta_data.next_ptr = meta_data_.next_ptr;
+        meta_data.loc_ptr = meta_data_.loc_ptr;
+    }
+
+    ~RecordMeta()=default;
+
+    bool operator==(const RecordMeta &rhs) const{
+        bool equal = meta_data.loc_ptr == rhs.meta_data.loc_ptr ;
         return equal;
     }
     bool operator!=(const RecordMeta &rhs) const {
@@ -231,27 +255,27 @@ struct RecordMeta{
     inline RecordMetadata GetMetaData() {
         return meta_data;
     }
-    inline void SetMetaPtr(uint64_t ptr){
-        meta_ptr = ptr;
-    }
-    inline RecordMetadata *GetMetaPtr() const{
-        return reinterpret_cast<RecordMetadata *>(meta_ptr);
-    }
-    inline uint64_t GetMetaPtrVal() const{
-        return  meta_ptr;
-    }
-    inline void SetNodeHdPtr(uint64_t ptr){
-        node_header_ptr = ptr;
-    }
-//    inline NodeHeader *GetNodeHdPtr() const{
-//        return reinterpret_cast<NodeHeader *>(node_header_ptr);
+//    inline void SetMetaPtr(uint64_t ptr){
+//        meta_ptr = ptr;
 //    }
-    inline char *GetNodeHdPtr() const{
-        return reinterpret_cast<char *>(node_header_ptr);
-    }
-    inline char *GetNodePtr() const{
-        return reinterpret_cast<char *>(block_ptr);
-    }
+//    inline RecordMetadata *GetMetaPtr() const{
+//        return reinterpret_cast<RecordMetadata *>(meta_ptr);
+//    }
+//    inline uint64_t GetMetaPtrVal() const{
+//        return  meta_ptr;
+//    }
+//    inline void SetNodeHdPtr(uint64_t ptr){
+//        node_header_ptr = ptr;
+//    }
+////    inline NodeHeader *GetNodeHdPtr() const{
+////        return reinterpret_cast<NodeHeader *>(node_header_ptr);
+////    }
+//    inline char *GetNodeHdPtr() const{
+//        return reinterpret_cast<char *>(node_header_ptr);
+//    }
+//    inline char *GetNodePtr() const{
+//        return reinterpret_cast<char *>(block_ptr);
+//    }
     inline void SetTotalSize(uint32_t sz){
         total_size = sz;
     }
@@ -492,9 +516,9 @@ public:
 
     size_t WriteEntry(char *data_ptr, const char *sr_ptr, size_t size_){
         if(nvm_emulate){
-            std::memcpy(data_ptr, sr_ptr, size_);
+            VSTORE_MEMCPY(data_ptr, sr_ptr, size_);
         }else{
-            memcpy(data_ptr, sr_ptr, size_);
+            VSTORE_MEMCPY(data_ptr, sr_ptr, size_);
         }
 
         return size_;

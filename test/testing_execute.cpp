@@ -161,7 +161,7 @@ TEST_F(ExecuteTest, BasicTransactionTest) {
                 aborted_txns++;
             }
         }
-        std::cout << "[Insert-Abort Transactions] Committed " << committed_txns
+        std::cout << "164:[Insert-Abort Transactions] Committed " << committed_txns
                   << ", Aborted " << aborted_txns << std::endl;
 
     }
@@ -197,7 +197,7 @@ TEST_F(ExecuteTest, BasicTransactionTest) {
                 committed_txns++;
             }
         }
-        std::cout << "[Empty-Lookup Transactions] Committed " << committed_txns
+        std::cout << "200:[Empty-Lookup Transactions] Committed " << committed_txns
                   << ", Aborted " << aborted_txns << std::endl;
     };
 
@@ -230,7 +230,7 @@ TEST_F(ExecuteTest, BasicTransactionTest) {
                 committed_txns++;
             }
         }
-        std::cout << "[Scan-Table Transactions] Committed " << committed_txns
+        std::cout << "233:[Scan-Table Transactions] Committed " << committed_txns
                   << ", Aborted " << aborted_txns << std::endl;
     };
 
@@ -242,12 +242,13 @@ TEST_F(ExecuteTest, BasicTransactionTest) {
         for (int i = 0; i < n_txns; ++i) {
             auto transaction_manager = SSNTransactionManager::GetInstance();
             auto txn_ctx = transaction_manager->BeginTransaction(IsolationLevelType::SERIALIZABLE);
+            uint64_t key = i;
             Tuple tuple;
             tuple.key = i;
             for (int j = 0; j < 10; ++j)
                 tuple.values[j] = i;
 
-            const char *id_ = reinterpret_cast<const char *>(&(i));
+            const char *id_ = reinterpret_cast<const char *>(&(key));
             InsertExecutor<const char *, Tuple> executor(data_table,
                                                          id_,
                                                      sizeof(uint64_t),
@@ -264,7 +265,7 @@ TEST_F(ExecuteTest, BasicTransactionTest) {
                 committed_txns++;
             }
         }
-        std::cout << "[Insert Transactions] Committed " << committed_txns
+        std::cout << "267:[Insert Transactions] Committed " << committed_txns
                   << ", Aborted " << aborted_txns << std::endl;
     }
 
@@ -307,7 +308,7 @@ TEST_F(ExecuteTest, BasicTransactionTest) {
                 committed_txns++;
             }
         }
-        std::cout << "[Lookup Transactions] Committed " << committed_txns
+        std::cout << "310:[Lookup Transactions] Committed " << committed_txns
                   << ", Aborted " << aborted_txns << std::endl;
     };
 

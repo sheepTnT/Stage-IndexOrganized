@@ -5,23 +5,29 @@
 #ifndef MVSTORE_VALEN_BUFFER_H
 #define MVSTORE_VALEN_BUFFER_H
 
+
 #include "../common/macros.h"
 #include "../common/object_pool.h"
 
+
 namespace mvstore{
 
-//static const uint32_t BUFFER_SEGMENT_SIZE = 1 << 14;
 /**
 * A RecordBufferSegment is a piece of (reusable) memory used to hold undo records. The segment internally keeps track
 * of its memory usage.
 *
-* This class should not be used by itself. @see UndoBuffer, @see RedoBuffer
+* This class should not be used by itself. @see UndoBuffer, @see InnerNodeBuffer
 *
 * Not thread-safe.
 */
 class ValenBuffer{
 public:
     ValenBuffer(){
+//        void *ptr = malloc(BUFFER_SEGMENT_SIZE);
+//        if (!ptr) {
+//            throw std::bad_alloc();
+//        }
+
         buffer_data_ = new char[BUFFER_SEGMENT_SIZE];
     }
 
@@ -66,10 +72,21 @@ public:
         return this;
     }
 
-    void erase(){
+    /**
+     * decrease the count of the used segment in the valen buffer
+     */
+    void Erase(){
         latch.lock();
         count_ = count_ -1;
         latch.unlock();
+    }
+
+    /**
+     * current count of the used segments in the valen buffer
+     * @return
+     */
+    uint32_t CurrentCount(){
+        return count_;
     }
 
 private:
@@ -116,7 +133,7 @@ public:
 using RecordBufferPool = ObjectPool<ValenBuffer, ValenBufferAllocator>;
 
 /**
-* holds the overwritten record versions,
+* allocate segments to hold the overwritten record version,
  * 1. if the txn failure, it will be copied back to the tree,
  * 2. if the txn success commit, it will be released by the clear thread.
  */
@@ -146,18 +163,27 @@ public:
     /**
      * decrease the entrys count of the valen buffer
      * if the count =0, then the valen buffer can be release
+     * and reused
      * @param index_
      */
     void Erase(uint32_t index_) const{
         ValenBuffer *val_buffer_ = buffers_[index_];
         //valenbuffer block count --
-        val_buffer_->erase();
+        val_buffer_->Erase();
+        if (val_buffer_->CurrentCount() == 0){
+            ValenBuffer *free_ = val_buffer_->Reset();
+            buffer_pool_->Release(free_);
+//            LOG_DEBUG("release the undo valen buffer");
+        }
+
+//        LOG_DEBUG("erase the overwritten record segment of the undo valen buffer");
     }
 
     /**
      * Reserve an undo record with the given size.
      * @param size the size of the undo record to allocate
      * @return a new undo record with at least the given size reserved
+     *         <offset of the buffers, offset of the valen_buffer>
      */
     std::pair<uint32_t, char *>NewEntry(const uint32_t size) {
         latch.Lock();
@@ -191,6 +217,10 @@ private:
     std::vector<ValenBuffer *> buffers_;
     char *last_record_ = nullptr;
 };
+/**
+ * allocate segments to holds the inner node records
+ * because the btree's inner nodes are variable size
+ */
 class InnerNodeBuffer {
 public:
 
@@ -211,16 +241,23 @@ public:
      * @return true if UndoBuffer contains no UndoRecords, false otherwise
      */
     bool Empty() const { return buffers_.empty(); }
+
     void Erase(uint32_t index_) const{
         ValenBuffer *val_buffer_ = buffers_[index_];
-        val_buffer_->erase();
+        val_buffer_->Erase();
+        if (val_buffer_->CurrentCount() == 0){
+            ValenBuffer *free_ = val_buffer_->Reset();
+            buffer_pool_->Release(free_);
+//            LOG_DEBUG("release the inner node valen buffer");
+        }
+//        LOG_DEBUG("erase the record segment of the inner node valen buffer");
     }
     /**
      * Reserve an undo record with the given size.
      * @param size the size of the undo record to allocate
      * @return a new undo record with at least the given size reserved
      */
-    char *NewEntry(const uint32_t size) {
+    std::pair<uint32_t, char *>NewEntry(const uint32_t size) {
         latch.Lock();
         if (buffers_.empty() || !buffers_.back()->HasBytesLeft(size)) {
             // we are out of space in the buffer. Get a new buffer segment.
@@ -236,7 +273,9 @@ public:
         }
         last_record_ = buffers_.back()->Reserve(size);
         latch.Unlock();
-        return last_record_;
+
+        return std::make_pair((buffers_.size()-1),last_record_);
+//        return last_record_;
     }
 
     /**
@@ -251,6 +290,55 @@ private:
     std::vector<ValenBuffer *> buffers_;
     char *last_record_ = nullptr;
 };
+
+/**
+ * A block is a chunk of memory used for storage. It does not have any meaning
+ * this only used by initializing a leaf node of the btree
+ */
+class DramBlock {
+
+    /**
+     * Contents of the dram block.
+     */
+    char content_[DRAM_BLOCK_SIZE];
+};
+
+/**
+* Custom allocator used for the object pool of buffer segments
+* Get, Reuse, Release handled in object pool
+*/
+class DramBlockAllocator {
+public:
+    /**
+     * Allocates a new object by calling its constructor.
+     * @return a pointer to the allocated object.
+     */
+    DramBlock *New() {
+
+        DramBlock *dram_block = new DramBlock;
+
+        return dram_block;
+    }
+
+    /**
+     * Reuse a reused chunk of memory to be handed out again
+     * @param reused memory location, possibly filled with junk bytes
+     */
+    void Reuse(DramBlock *const reused) {
+      /* no need operation, handled in object pool*/
+    }
+
+    /**
+     * Deletes the object by calling its destructor.
+     * @param ptr a pointer to the object to be deleted.
+     */
+    void Delete(DramBlock *const ptr) {
+        delete ptr;
+    }
+};
+
+using DramBlockPool = ObjectPool<DramBlock, DramBlockAllocator>;
+
 
 }
 #endif

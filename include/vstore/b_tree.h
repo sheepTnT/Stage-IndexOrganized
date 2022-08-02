@@ -202,50 +202,57 @@ public:
 // in both cases, the record metadata should not be touched,
 // thus we can safely dereference them without a wrapper.
 class InternalNode : public BaseNode {
+private:
+    uint32_t segment_index;
 public:
 
-    static void  New(InternalNode **mem, uint32_t alloc_size, InnerNodeBuffer *inner_node_buffer)   {
-        char *inner_node_ = inner_node_buffer->NewEntry(alloc_size);
-        *mem = reinterpret_cast<InternalNode *>(inner_node_);
+    static void  New(InternalNode **new_node, uint32_t alloc_size, InnerNodeBuffer *inner_node_buffer)   {
+        auto entry_ = inner_node_buffer->NewEntry(alloc_size);
+        char *inner_node_ = entry_.second;
+        *new_node = reinterpret_cast<InternalNode *>(inner_node_);
 
-        VSTORE_MEMSET((*mem), 0, alloc_size);
-        (*mem)->header.size = alloc_size;
+        VSTORE_MEMSET((*new_node), 0, alloc_size);
+        (*new_node)->header.size = alloc_size;
+        (*new_node)->segment_index = entry_.first;
     }
 
 // Create an internal node with a new key and associated child pointers inserted
 // based on an existing internal node
     static void  New(InternalNode *src_node, const char *key, uint32_t key_size,
                      uint64_t left_child_addr, uint64_t right_child_addr,
-                            InternalNode **mem, InnerNodeBuffer *inner_node_buffer)   {
+                            InternalNode **new_node, InnerNodeBuffer *inner_node_buffer)   {
         size_t alloc_size = src_node->GetHeader()->size +
                               RecordMetadata::PadKeyLength(key_size) +
                               sizeof(right_child_addr) + sizeof(RecordMetadata);
 
-        char *inner_node_ = inner_node_buffer->NewEntry(alloc_size);
-        *mem = reinterpret_cast<InternalNode *>(inner_node_);
-        VSTORE_MEMSET((*mem), 0, alloc_size);
+        auto entry_ = inner_node_buffer->NewEntry(alloc_size);
+        char *inner_node_ = entry_.second;
+        *new_node = reinterpret_cast<InternalNode *>(inner_node_);
+        VSTORE_MEMSET((*new_node), 0, alloc_size);
 
-        new(*mem) InternalNode(alloc_size, src_node, 0,
+        new(*new_node) InternalNode(alloc_size, src_node, 0,
                                src_node->header.sorted_count,
                                key, key_size, left_child_addr, right_child_addr);
-
+        (*new_node)->segment_index = entry_.first;
     }
 
 // Create an internal node with a single separator key and two pointers
     static void  New(const char *key, uint32_t key_size, uint64_t left_child_addr,
-                                uint64_t right_child_addr, InternalNode **mem,
+                                uint64_t right_child_addr, InternalNode **new_node,
                                 InnerNodeBuffer *inner_node_buffer) {
         size_t alloc_size = sizeof(InternalNode) +
                               RecordMetadata::PadKeyLength(key_size) +
                               sizeof(left_child_addr) + sizeof(right_child_addr) +
                               sizeof(RecordMetadata) * 2;
 
-        char *inner_node_ = inner_node_buffer->NewEntry(alloc_size);
-        *mem = reinterpret_cast<InternalNode *>(inner_node_);
-        VSTORE_MEMSET((*mem), 0, alloc_size);
+        auto entry_ = inner_node_buffer->NewEntry(alloc_size);
+        char *inner_node_ = entry_.second;
+        *new_node = reinterpret_cast<InternalNode *>(inner_node_);
+        VSTORE_MEMSET((*new_node), 0, alloc_size);
 
-        new(*mem) InternalNode(alloc_size, key, key_size, left_child_addr,
+        new(*new_node) InternalNode(alloc_size, key, key_size, left_child_addr,
                                right_child_addr);
+        (*new_node)->segment_index = entry_.first;
     }
     static void  New(InternalNode *src_node, uint32_t begin_meta_idx,
                            uint32_t nr_records, const char *key, uint32_t key_size,
@@ -274,13 +281,15 @@ public:
                            sizeof(RecordMetadata));
         }
 
-        char *inner_node_ = inner_node_buffer->NewEntry(alloc_size);
+        auto entry_ = inner_node_buffer->NewEntry(alloc_size);
+        char *inner_node_ = entry_.second;
         *new_node = reinterpret_cast<InternalNode *>(inner_node_);
         memset(*new_node, 0, alloc_size);
 
         new (*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                                      key, key_size, left_child_addr, right_child_addr,
                                      left_most_child_addr);
+        (*new_node)->segment_index = entry_.first;
 
     }
 
@@ -312,6 +321,8 @@ public:
                       cid_t commit_id);
 
     uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_le = true);
+    //if key is exist, return the location
+//    uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_le = false);
 
     inline BaseNode *GetChildByMetaIndex(uint32_t index) {
         uint64_t child_addr;
@@ -370,6 +381,9 @@ public:
         return true;
     }
 
+    inline uint32_t GetSegmentIndex(){
+        return segment_index;
+    }
 
 };
 
@@ -499,7 +513,8 @@ public:
     ReturnCode Insert(const char *key, uint16_t key_size, const char *payload,
                       uint32_t payload_size,
                       RecordMetadata **meta, cid_t commit_id,
-                      uint32_t split_threshold);
+                      uint32_t split_threshold,
+                      RecordLocation **record_location);
     static ReturnCode FinalizeInsert(RecordMetadata *rm_meta, cid_t commit_id);
     static ReturnCode FinalizeInsert(RecordMetadata *rm_meta, uint64_t offset,
                                      uint64_t key_len, uint64_t commit_id);
@@ -597,7 +612,7 @@ public:
             char *col_v_loc = data_ptr + col_off;
             const char *col_v_loc_other = other + off;
 
-            std::memcpy(col_v_loc, col_v_loc_other, col_size);
+            VSTORE_MEMCPY(col_v_loc, col_v_loc_other, col_size);
 
             off = off + col_size;
         }
@@ -700,13 +715,14 @@ class BTree {
 public:
     // init a new tree
     BTree(const ParameterSet param, const Catalog &catalog, DramBlockPool *pool,
-                            InnerNodeBuffer *inner_node, EphemeralPool *conflict_buffer) :
+                            InnerNodeBuffer *inner_node, EphemeralPool *overwritten_buffer) :
                             parameters(param), schema(catalog), leaf_node_pool(pool),
-                            inner_node_pool(inner_node), conflict_buffer_(conflict_buffer) {
+                            inner_node_pool(inner_node), overwritten_buffer_(overwritten_buffer) {
         //initialize a Dram Block(leaf node)
         root = reinterpret_cast<BaseNode *>(leaf_node_pool->Get());
         LeafNode **root_node = reinterpret_cast<LeafNode **>(&root);
         LeafNode::New(root_node, parameters.leaf_node_size, leaf_node_pool);
+        AddDefaultRecordIndirectionArray();
     }
 
     void Dump();
@@ -752,6 +768,9 @@ public:
 
     bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr);
 
+    oid_t AddDefaultRecordIndirectionArray();
+    void RecordIndirectLocation(RecordLocation **location);
+
     Catalog &GetTableSchema(){
         return schema;
     }
@@ -761,7 +780,7 @@ public:
     ParameterSet parameters;
     Catalog schema;
     //for overwrittern record versions
-    EphemeralPool *conflict_buffer_;
+    EphemeralPool *overwritten_buffer_;
 
         inline BaseNode *GetRootNodeSafe() {
             auto root_node = root;

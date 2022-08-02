@@ -175,6 +175,9 @@ namespace mvstore {
             } else {
                 reuse_queue_.push(obj);
             }
+
+//           std::cout << "object pool release, current size: %u, size limit : %u" << current_size_ <<
+//           ","<< size_limit_ << std::endl;
         }
 
         /**

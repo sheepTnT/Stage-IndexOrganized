@@ -124,6 +124,7 @@ void ParseArguments(int argc, char *argv[], configuration &state) {
   state.string_mode = false;
   state.scan_mode = false;
   state.random_mode = false;
+  state.vc_start = false;
 
 
   // Parse args
@@ -244,7 +245,7 @@ void WriteOutput() {
     LOG_INFO("%s : %d", "operation_count", state.operation_count);
     LOG_INFO("%s : %lf", "update_ratio", state.update_ratio);
     LOG_INFO("%s : %lf", "zipf_theta", state.zipf_theta);
-    LOG_INFO("%s : %lf", "throughput(ops/s)", state.throughput);
+    LOG_INFO("%s : %lf", "throughput(ops)", state.throughput);
     LOG_INFO("%s : %lf", "abort_rate", state.abort_rate);
     LOG_INFO("%s : %lf", "scan_latency(ms)", state.scan_latency);
 

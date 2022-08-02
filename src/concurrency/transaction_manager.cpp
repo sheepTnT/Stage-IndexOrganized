@@ -35,30 +35,37 @@ cid_t SSNTransactionManager::FindMaxPstamp(TransactionContext *const current_txn
     //iter the wr_sets
     for(auto &entry: rw_set){
          RecordMetadata meta = (entry.first.meta_data);
+        auto meta_location = meta.GetLocationPtr()->record_meta_ptr;
+        RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(meta_location);
+
          if(entry.second == RWType::UPDATE || entry.second== RWType::DELETE){
              std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
-                     conflict_buffer_pool->GetOversionHeader(meta.GetNextPointer());
+                     overwritten_buffer_pool->GetOversionHeader(meta_ptr->GetNextPointer());
              if(hdr != nullptr){
                  int reader_size = hdr->GetReadersNum();
                  for(int i = 0; i< reader_size; ++i){
                      auto rdr_id = hdr->GetReaders(i);
                      TransactionContext *txn_conxt;
-                     if(active_tids.Find(rdr_id, txn_conxt) == true && txn_conxt->IsAbort() == false){
-                         auto r_cstamp = txn_conxt->GetCommitId();
-                         //reader committed
-                         while (r_cstamp > INVALID_CID){
-                             //we just care those commit before me
-                             if (r_cstamp < t_cstamp){
-                                 //t.pstamp = max(t.pstamp, r.cstamp)
-                                 while (txn_conxt->IsFinished()){
-                                     if (txn_conxt->IsAbort() == false){
-                                         ps_max = std::max(ps_max, r_cstamp);
+                     if(active_tids.Find(rdr_id, txn_conxt)){
+                         if (!txn_conxt->IsAbort()){
+                             auto r_cstamp = txn_conxt->GetCommitId();
+                             //reader committed
+                             while (r_cstamp > INVALID_CID){
+                                 //we just care those commit before me
+                                 if (r_cstamp < t_cstamp){
+                                     //t.pstamp = max(t.pstamp, r.cstamp)
+                                     while (txn_conxt->IsFinished()){
+                                         if (!txn_conxt->IsAbort()){
+                                             ps_max = std::max(ps_max, r_cstamp);
+                                         }
+                                         break;
                                      }
-                                     break;
                                  }
+                                 break;
                              }
-                             break;
                          }
+                     }else{
+                         LOG_DEBUG("can not find the transaction from the active tids.");
                      }
                  }
 
@@ -90,49 +97,59 @@ cid_t SSNTransactionManager::FindMinSstamp(TransactionContext *const current_txn
     for(auto &entry: rw_set){
         RecordMetadata meta = (entry.first.meta_data);
         if(entry.second == RWType::READ){
-            auto curr_meta = entry.first.GetMetaPtr();
-            auto metaptr_val = entry.first.GetMetaPtrVal();
+//            auto curr_meta = entry.first.GetMetaPtr();
+//            auto metaptr_val = entry.first.GetMetaPtrVal();
+            auto meta_location = meta.GetLocationPtr()->record_meta_ptr;
+//            void *meta_ptr_ = reinterpret_cast<void *>(meta_location);
+            RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(meta_location);
+
             auto meta_cstamp = meta.GetTxnCommitId();
-            auto curr_cstamp = curr_meta->GetTxnCommitId();
+            auto curr_cstamp = meta_ptr->GetTxnCommitId();
             //we find it, it has been commited, and overwriteen
             if (curr_cstamp != meta_cstamp && (curr_cstamp < t_cstamp)){
                 //curr_cstamp is the writer transaction's cstamp
-                auto overwroter = conflict_buffer_pool->GetOveriter(metaptr_val, meta_cstamp);
-                if (overwroter != INVALID_CID){
+//                auto overwroter = overwritten_buffer_pool->GetOveriter(metaptr_val, meta_cstamp);
+                if (curr_cstamp != INVALID_CID){
                     TransactionContext *txn_conxt;
-                    if(active_tids.Find(overwroter, txn_conxt) ==true) {
-                        if (txn_conxt->IsAbort() == false){
+                    if(active_tids.Find(curr_cstamp, txn_conxt)) {
+                        if (!txn_conxt->IsAbort()){
                             assert(txn_conxt->IsFinished());
                             //t.sstamp = min(t.sstamp, v.sstamp)
                             auto u_sstamp = txn_conxt->GetSuccessor();
                             ss_min = std::min(ss_min, u_sstamp);
                         }
+                    }else{
+                        LOG_DEBUG("can not find the transaction from the active tids.");
                     }
                 }
-
             }else {
                 //we find it in the buffer,if find, it is in writting
                 std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr_curr =
-                        conflict_buffer_pool->GetOversionHeader(curr_meta->GetNextPointer());
+                        overwritten_buffer_pool->GetOversionHeader(meta_ptr->GetNextPointer());
                 if (hdr_curr != nullptr){
+                    assert(meta_cstamp == hdr_curr->GetPstamp());
                     //when update the version, cstamp is the writer txn
                     cid_t u_txn_id = hdr_curr->GetCstamp();
                     TransactionContext *txn_conxt;
-                    if(active_tids.Find(u_txn_id, txn_conxt) ==true && txn_conxt->IsAbort() == false) {
-                        auto u_cstamp = txn_conxt->GetCommitId();
-                        //if the txn is flighting or precommitt
-                        while (u_cstamp > INVALID_CID) {
-                            if (u_cstamp < t_cstamp) {
-                                while (txn_conxt->IsFinished()){
-                                    if (txn_conxt->IsAbort() == false){
-                                        auto u_sstamp = txn_conxt->GetSuccessor();
-                                        ss_min = std::min(ss_min, u_sstamp);
+                    if(active_tids.Find(u_txn_id, txn_conxt)) {
+                        if (!txn_conxt->IsAbort()){
+                            auto u_cstamp = txn_conxt->GetCommitId();
+                            //if the txn is flighting or precommitt
+                            while (u_cstamp > INVALID_CID) {
+                                if (u_cstamp < t_cstamp) {
+                                    while (txn_conxt->IsFinished()){
+                                        if (!txn_conxt->IsAbort()){
+                                            auto u_sstamp = txn_conxt->GetSuccessor();
+                                            ss_min = std::min(ss_min, u_sstamp);
+                                        }
+                                        break;
                                     }
-                                    break;
                                 }
+                                break;
                             }
-                            break;
                         }
+                    }else{
+                        LOG_DEBUG("can not find the transaction from the active tids.");
                     }
                 }
             }
@@ -154,14 +171,50 @@ txn_id_t SSNTransactionManager::GetNextCurrentTidCounter() {
  * find the min active transaction begin id
  * @return
  */
-//txn_id_t SSNTransactionManager::MinActiveTID() {
-//    txn_id_t min_tid = tid_counter.load();
-//    active_tids.Iterate([&](const txn_id_t tid, int) {
+cid_t SSNTransactionManager::MinActiveTID() {
+    cid_t min_tid = tid_counter.load();
+    active_tids.Iterate([&](const txn_id_t tid, TransactionContext *txn_conxt) {
 //        min_tid = std::min(min_tid, tid);
-//    });
-//
-//    return min_tid;
-//}
+        if (txn_conxt->IsAbort()==false && txn_conxt->IsFinished() ==false){
+            min_tid = std::min(min_tid, txn_conxt->GetReadId());
+        }
+    });
+
+    return min_tid;
+}
+/**
+ * get the transaction context by txn id
+ * @return transaction context
+ */
+TransactionContext *SSNTransactionManager::GetTransactionContext(const txn_id_t tid) {
+    TransactionContext *txn_conxt;
+    if(active_tids.Find(tid, txn_conxt) && !txn_conxt->IsAbort()){
+        return txn_conxt;
+    }
+    return nullptr;
+}
+
+bool SSNTransactionManager::EraseTid(const txn_id_t tid) {
+    auto rel = active_tids.Erase(tid);
+    return rel;
+}
+
+void SSNTransactionManager::CleanTxnOverwrittenBuffer(
+                                    TransactionContext *const current_txn){
+    auto overwritten_buffer = current_txn->GetOverwrittenBuffer();
+    for(int i=0; i<overwritten_buffer.size(); i++){
+        auto copy_location = overwritten_buffer[i];
+        std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
+                overwritten_buffer_pool->GetOversionHeader(copy_location);
+        if (hdr == nullptr){
+            LOG_DEBUG("CleanTxnOverwrittenBuffer, has not found the location.");
+        }else{
+            assert(hdr->waiting_free == true);
+            assert(hdr->Count()==0);
+            overwritten_buffer_pool->Free(hdr->GetBufferIndex(), copy_location);
+        }
+    }
+}
 
 TransactionContext *SSNTransactionManager::BeginTransaction(
         const size_t thread_id, const IsolationLevelType type) {
@@ -231,6 +284,10 @@ bool SSNTransactionManager::IsOwner(TransactionContext *const current_txn,
 }
 
 /**
+ * For a read, there are three occurs:
+ *   1) read a active version, perform read;
+ *   2) read a overwritten version, perform read;
+ *   3) read a retired version, need not perform read
  * only read will call this function
  * check the read set if they are writing by someone
  * and these txns have finished the perform update/delete
@@ -259,11 +316,12 @@ bool SSNTransactionManager::PerformRead(TransactionContext *const current_txn,
         //then the copy location is active state, hdr != null
         auto read_copy_location = record_meta.meta_data.GetNextPointer();
         std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
-                conflict_buffer_pool->GetOversionHeader(read_copy_location);
+                overwritten_buffer_pool->GetOversionHeader(read_copy_location);
         if(hdr != nullptr){
             //if the copy record is going to commit
             //then current read will be failure
-            bool read_ret = conflict_buffer_pool->IncreaseWRCount(read_copy_location);
+            bool read_ret =
+                overwritten_buffer_pool->IncreaseWRCount(read_copy_location);
             if (!read_ret){return false;}
             //then read the copy record
             SpinLatch &latch_ = hdr->Getlatch();
@@ -311,8 +369,11 @@ bool SSNTransactionManager::PerformInsert(TransactionContext *const current_txn,
 bool SSNTransactionManager::PerformUpdate(TransactionContext *const current_txn,
                                                RecordMeta &new_meta_location,
                                                TupleHeader *new_tuple_location) {
+    auto meta_location = new_meta_location.meta_data.GetLocationPtr();
+//    void *meta_ptr = (reinterpret_cast<void *>(meta_location->record_meta_ptr));
+    RecordMetadata *meta_ptr_ = reinterpret_cast<RecordMetadata *>(meta_location->record_meta_ptr);
 
-    auto is_inserting = new_meta_location.GetMetaPtr()->IsInserting();
+    auto is_inserting = meta_ptr_->IsInserting();
     if (!is_inserting){
         return false;
     }
@@ -320,9 +381,10 @@ bool SSNTransactionManager::PerformUpdate(TransactionContext *const current_txn,
     //meta.txn_id is the v_pstamp, v_cstamp
     cid_t v_cstamp = new_meta_location.meta_data.GetTxnCommitId();
     //get the copy record location
-    auto copy_location = new_meta_location.GetMetaPtr()->GetNextPointer();
+    auto copy_location = meta_ptr_->GetNextPointer();
+//    LOG_DEBUG("copy location, %lu", copy_location);
     std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
-            conflict_buffer_pool->GetOversionHeader(copy_location);
+            overwritten_buffer_pool->GetOversionHeader(copy_location);
     if (hdr == nullptr){
         return false;
     }
@@ -333,13 +395,15 @@ bool SSNTransactionManager::PerformUpdate(TransactionContext *const current_txn,
     new_tuple_location->SetNextHeaderPointer(hdr->GetNext());
 
     //set the copy record location'next ptr = new tuple header
-    conflict_buffer_pool->SetPre(copy_location,
+    overwritten_buffer_pool->SetPre(copy_location,
                                   reinterpret_cast<uint64_t>(new_tuple_location));
 
     COMPILER_MEMORY_FENCE;
 
     //record update set
     bool update_recrd = current_txn->RecordUpdate(new_meta_location);
+    //record the overwritten location
+    current_txn->BufferOverwrittenVersion(copy_location);
 
     SpinLatch &latch_ = hdr->Getlatch();
     latch_.Lock();
@@ -354,6 +418,7 @@ bool SSNTransactionManager::PerformUpdate(TransactionContext *const current_txn,
         current_txn->SetPredecessor(std::max(txn_ps, v_pre_pstamp));
 
         if(current_txn->GetSuccessor() <= current_txn->GetPredecessor()){
+            LOG_INFO("perform update verify fail, transaction abort.");
             return false;
         }
     }
@@ -365,18 +430,21 @@ bool SSNTransactionManager::PerformUpdate(TransactionContext *const current_txn,
 }
 
 bool SSNTransactionManager::PerformDelete(TransactionContext *const current_txn,
-                                               RecordMeta &meta_location) {
+                                               RecordMeta &meta_location_) {
     //delete, just copy the record to the buffer pool
     //has no new tuple header
-    cid_t pstamp = meta_location.meta_data.GetTxnCommitId();
+    auto meta_location = meta_location_.meta_data.GetLocationPtr();
+    RecordMetadata *meta_ptr_ = reinterpret_cast<RecordMetadata *>(meta_location->record_meta_ptr);
+
+    cid_t pstamp = meta_ptr_->GetTxnCommitId();
     //get the copy record location
-    auto copy_location = meta_location.meta_data.GetNextPointer();
+    auto copy_location = meta_ptr_->GetNextPointer();
     std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
-            conflict_buffer_pool->GetOversionHeader(copy_location);
+            overwritten_buffer_pool->GetOversionHeader(copy_location);
     assert(hdr != nullptr);
 
     //record update set
-    bool del_recrd = current_txn->RecordDelete(meta_location);
+    bool del_recrd = current_txn->RecordDelete(meta_location_);
 
     if(del_recrd){
         cid_t txn_ps = current_txn->GetPredecessor();
@@ -407,7 +475,7 @@ ResultType SSNTransactionManager::CommitTransaction(
         TransactionContext *const current_txn) {
 
     //if the txn is read only
-    if (current_txn->IsReadOnly() == true) {
+    if (current_txn->IsReadOnly()) {
         current_txn->SetFinished();
         current_txn->SetResult(ResultType::SUCCESS);
         EndTransaction(current_txn);
@@ -426,16 +494,15 @@ ResultType SSNTransactionManager::CommitTransaction(
 //    LOG_DEBUG("commit txn current commit :%u.", end_commit_id);
 
     auto &rw_set = current_txn->GetReadWriteSet();
+//    LOG_DEBUG("commit rw set size: %lu", rw_set.size());
 
     //pre-commit
     //transaction init, pstamp=0, sstamp=Max
     cid_t t_cstamp = end_commit_id;
     cid_t t_pstamp = INVALID_CID;
     cid_t t_sstamp = MAX_CID;
-    uint32_t retry_count = 0;
 
     // finalize min backward edges
-    //t.sstamp = min(t.sstamp, t.cstamp);
     t_sstamp = FindMinSstamp(current_txn);
     current_txn->SetSuccessor(t_sstamp);
 
@@ -444,6 +511,7 @@ ResultType SSNTransactionManager::CommitTransaction(
     current_txn->SetPredecessor(t_pstamp);
 
     if (t_sstamp <= t_pstamp){
+        LOG_INFO("pre commit fail, transaction abort.");
         return ResultType::FAILURE;
     }
 
@@ -460,21 +528,22 @@ ResultType SSNTransactionManager::CommitTransaction(
     // Iterate through each item pointer in the read write set
     for (const auto &tuple_entry : rw_set) {
         RecordMetadata meta_data = tuple_entry.first.meta_data;
-        auto table_id = tuple_entry.first.table_id;
-        auto block_location = tuple_entry.first.block_ptr;
-        auto meta_ptr = tuple_entry.first.GetMetaPtr();
+//        auto table_id = tuple_entry.first.table_id;
+//        auto block_location = tuple_entry.first.block_ptr;
+//        auto meta_ptr = tuple_entry.first.GetMetaPtr();
+        auto meta_location = meta_data.GetLocationPtr()->record_meta_ptr;
+//        void *meta_ptr_ = reinterpret_cast<void *>(meta_location);
+        RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(meta_location);
         auto total_sz = tuple_entry.first.GetTotalSize();
 
         if (tuple_entry.second == RWType::UPDATE) {
             //if above check is ok
-            uint64_t record_copy_location = meta_data.GetNextPointer();
+            uint64_t record_copy_location = meta_ptr->GetNextPointer();
             //concurrency, this may be null,
             //or has no blcok space
             std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
-                    conflict_buffer_pool->GetOversionHeaderComm(record_copy_location);
-            if (hdr == nullptr) {
-                continue;
-            }
+                    overwritten_buffer_pool->GetOversionHeaderComm(record_copy_location);
+            assert(hdr != nullptr);
             hdr->SetSstamp(t_sstamp);
             hdr->SetWaiting(true);
 
@@ -487,8 +556,7 @@ ResultType SSNTransactionManager::CommitTransaction(
                 new_tuple_header->SetBeginId(meta_data.GetTxnCommitId());
                 new_tuple_header->SetCommitId(t_sstamp);
                 auto tuple_slot_ptr = new_tuple_header->GetTupleSlot();
-                if(tuple_slot_ptr == 0 || tuple_slot_ptr == std::numeric_limits<uint64_t>::min() ||
-                        tuple_slot_ptr == std::numeric_limits<uint64_t>::max()){
+                if(tuple_slot_ptr == 0 || tuple_slot_ptr == std::numeric_limits<uint64_t>::max()){
                     LOG_INFO("Failed to get tuple slot location within current version block.");
                     return ResultType::FAILURE;
                 }
@@ -503,13 +571,13 @@ ResultType SSNTransactionManager::CommitTransaction(
 
             //reset  transaction info
             //update the btree record metadata
-            conflict_buffer_pool->UpdateSs(record_copy_location, t_sstamp);
-            conflict_buffer_pool->AddWriters(tuple_entry.first.GetMetaPtrVal(),
-                                             meta_data.GetTxnCommitId(), t_cstamp);
+            overwritten_buffer_pool->UpdateSs(record_copy_location, t_sstamp);
+//            overwritten_buffer_pool->AddWriters(meta_location,
+//                                                meta_data.GetTxnCommitId(), t_cstamp);
 
             RecordMetadata finl_meta = *meta_ptr;
-            RecordMetadata new_meta = meta_data;
-           //initialize new versio, v.cstamp = v.pstamp = t.cstam
+            RecordMetadata new_meta = finl_meta;
+           //initialize new version, v.cstamp = v.pstamp = t.cstamp
             new_meta.FinalizeForUpdate(t_cstamp);
             new_meta.SetNextPointer(next_tuple_header);
             bool new_meta_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
@@ -517,6 +585,7 @@ ResultType SSNTransactionManager::CommitTransaction(
                     &(finl_meta.meta),
                     new_meta.meta);
             COMPILER_MEMORY_FENCE;
+
             //set next = copy record, then other concurrent txns read copy
             bool new_meta_next = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
                     &meta_ptr->next_ptr,
@@ -535,23 +604,14 @@ ResultType SSNTransactionManager::CommitTransaction(
             version_block_mng->EnterCleaner(end_commit_id,
                                             GCVersionType::COMMIT_UPDATE,
                                             new_tuple_header,
-                                            sizeof(TupleHeader),
-                                            table_id,
-                                            block_location);
-            // free the copy pool copy record
-            // if the copy has no dependency txn(read txn), it will be free,
-            // now just make it waiting, when the block location 's count =0
-            // it will be really collected by garbage collector
-            conflict_buffer_pool->Free(record_copy_location);
-
+                                            sizeof(TupleHeader) );
         }else if (tuple_entry.second == RWType::INSERT) {
             //second, finalize the Btree insert
             RecordMetadata finl_meta = *meta_ptr;
-            RecordMetadata new_meta = meta_data;
+            RecordMetadata new_meta = finl_meta;
 
             new_meta.FinalizeForInsert(meta_data.GetOffset(),meta_data.GetKeyLength(), t_cstamp);
-            new_meta.SetNextPointer(0);
-//            LOG_DEBUG("insert commit end commit_id:%u.", end_commit_id);
+//            new_meta.SetNextPointer(0);
 
             bool record_meta_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
                     &meta_ptr->meta,
@@ -563,11 +623,11 @@ ResultType SSNTransactionManager::CommitTransaction(
 
         }else if (tuple_entry.second == RWType::DELETE) {
             //if above check is ok
-            uint64_t record_copy_location = meta_data.GetNextPointer();
+            uint64_t record_copy_location = meta_ptr->GetNextPointer();
 
             //concurrency, this may be null,
             std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
-                    conflict_buffer_pool->GetOversionHeaderComm(record_copy_location);
+                    overwritten_buffer_pool->GetOversionHeaderComm(record_copy_location);
             if (hdr == nullptr) {
                 continue;
             }
@@ -582,14 +642,14 @@ ResultType SSNTransactionManager::CommitTransaction(
             }
 
             //update copy record ssuccesor
-            conflict_buffer_pool->UpdateSs(record_copy_location, t_sstamp);
-            conflict_buffer_pool->AddWriters(tuple_entry.first.GetMetaPtrVal(),
-                                             meta_data.GetTxnCommitId(), t_cstamp);
+            overwritten_buffer_pool->UpdateSs(record_copy_location, t_sstamp);
+//            overwritten_buffer_pool->AddWriters(tuple_entry.first.GetMetaPtrVal(),
+//                                             meta_data.GetTxnCommitId(), t_cstamp);
 
             //reset the btree meta = 0
             //update the btree nodeheader deletesize++
             RecordMetadata finl_meta = *meta_ptr;
-            RecordMetadata new_meta = meta_data;
+            RecordMetadata new_meta = finl_meta;
             new_meta.FinalizeForDelete();
             bool record_meta_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
                     &meta_ptr->meta,
@@ -614,10 +674,7 @@ ResultType SSNTransactionManager::CommitTransaction(
             version_block_mng->EnterCleaner( end_commit_id,
                                             GCVersionType::COMMIT_DELETE,
                                             old_tuple_header,
-                                            sizeof(TupleHeader),
-                                            table_id,
-                                            block_location);
-            conflict_buffer_pool->Free(record_copy_location);
+                                            sizeof(TupleHeader) );
 
         }else if(tuple_entry.second == RWType::READ){
             //now, if the record is also latest, then update the recordmeta commitid;
@@ -625,14 +682,14 @@ ResultType SSNTransactionManager::CommitTransaction(
             //must be in copy pool, because the writing dependents current read
             auto meta_hdr = meta_data.GetNextPointer();
             std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
-                    conflict_buffer_pool->GetOversionHeaderComm(meta_hdr);
+                    overwritten_buffer_pool->GetOversionHeaderComm(meta_hdr);
             if(hdr != nullptr){
                 //update forwards v.pstamp = max(v.pstamp, t.cstamp)
                 auto v_ps_tamp = std::max(hdr->GetPstamp(), t_cstamp);
-                conflict_buffer_pool->UpdatePs(meta_hdr, v_ps_tamp);
+                overwritten_buffer_pool->UpdatePs(meta_hdr, v_ps_tamp);
                 //decrease count, if count <= 0, copy pool
                 //will free the location
-                conflict_buffer_pool->DecreaseWRCount(meta_hdr);
+                overwritten_buffer_pool->DecreaseWRCount(meta_hdr);
             }
         }
 
@@ -697,11 +754,9 @@ ResultType SSNTransactionManager::AbortTransaction(
         TransactionContext *const current_txn) {
 
     auto &rw_set = current_txn->GetReadWriteSet();
-
     auto buf_mgr_ = VersionStore::GetInstance();
     auto log_manager = buf_mgr_->GetLogManager();
     auto version_block_mng = VersionBlockManager::GetInstance();
-
     auto end_commit_id = current_txn->GetCommitId();
     current_txn->SetAbort();
     current_txn->SetResult(ResultType::ABORTED);
@@ -710,22 +765,19 @@ ResultType SSNTransactionManager::AbortTransaction(
     // Iterate through each item pointer in the read write set
     for (const auto &tuple_entry : rw_set) {
         RecordMetadata meta_data = tuple_entry.first.meta_data;
-        auto table_id = tuple_entry.first.table_id;
-        auto block_location = tuple_entry.first.block_ptr;
-        auto meta_ptr = tuple_entry.first.GetMetaPtr();
+        auto meta_location = meta_data.GetLocationPtr()->record_meta_ptr;
+        RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(meta_location);
+        auto node_hd_location = meta_data.GetLocationPtr()->node_header_ptr;
+        NodeHeader *node_hd_ptr =  reinterpret_cast<NodeHeader *>(node_hd_location);
         auto total_sz = tuple_entry.first.GetTotalSize();
 
         if (tuple_entry.second == RWType::READ_OWN) {
 
         } else if (tuple_entry.second == RWType::UPDATE) {
             //first, copy back to record from copy pool
-            uint64_t record_copy_location_ptr = meta_data.GetNextPointer();
-
+            uint64_t record_copy_location_ptr = meta_ptr->GetNextPointer();
             EphemeralPool::OverwriteVersionHeader *hdr =
-                    conflict_buffer_pool->GetOversionHeaderComm(record_copy_location_ptr).get();
-            if (hdr == nullptr){
-                continue;
-            }
+                    overwritten_buffer_pool->GetOversionHeaderComm(record_copy_location_ptr).get();
             assert(hdr != nullptr);
             auto next_tuple_header = hdr->GetNext();
             TupleHeader *new_tuple_header = nullptr;
@@ -742,14 +794,17 @@ ResultType SSNTransactionManager::AbortTransaction(
 
             //reset  txn info
             //update the btree record metadata
-            conflict_buffer_pool->UpdateSs(record_copy_location_ptr, MAX_CID);
-            conflict_buffer_pool->AddWriters(tuple_entry.first.GetMetaPtrVal(),
-                                             meta_data.GetTxnCommitId(), end_commit_id);
-            conflict_buffer_pool->SetNext(record_copy_location_ptr, (uint64_t)(0));
-            conflict_buffer_pool->SetPre(record_copy_location_ptr, (uint64_t)(0));
+            overwritten_buffer_pool->UpdateSs(record_copy_location_ptr, MAX_CID);
+//            overwritten_buffer_pool->AddWriters(tuple_entry.first.GetMetaPtrVal(),
+//                                             meta_data.GetTxnCommitId(), end_commit_id);
+            overwritten_buffer_pool->SetNext(record_copy_location_ptr, (uint64_t)(0));
+            overwritten_buffer_pool->SetPre(record_copy_location_ptr, (uint64_t)(0));
+            hdr->SetWaiting(true);
 
             //reset the update data, pstamp = old record commit id
-            auto node_location = tuple_entry.first.GetNodePtr();
+//            auto node_location = tuple_entry.first.GetNodePtr();
+            char *node_hd_loc = reinterpret_cast<char *>(node_hd_ptr);
+            auto node_location = node_hd_loc - 16;
             char *data_source_location = node_location + meta_ptr->GetOffset();
             char *record_copy_location = reinterpret_cast<char *>(record_copy_location_ptr);
             auto payload_sz = hdr->GetPayloadSize();
@@ -759,14 +814,24 @@ ResultType SSNTransactionManager::AbortTransaction(
             VSTORE_MEMCPY(data_source_location+padd_ken_sz, record_copy_location + ken_sz, payload_sz);
             COMPILER_MEMORY_FENCE;
 
+            //TODO:for test
+//            uint64_t k1= *reinterpret_cast<const uint64_t *>(data_source_location);
+//            uint64_t k2= *reinterpret_cast<const uint64_t *>(data_source_location+8);
+//            LOG_DEBUG("abot, record: %lu, %lu",k1,k2);
+
             RecordMetadata finl_meta = *meta_ptr;
-            RecordMetadata new_meta = meta_data;
-            new_meta.FinalizeForUpdate(end_commit_id);
+            RecordMetadata new_meta = finl_meta;
+            new_meta.FinalizeForUpdate();
             bool record_meta_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
                     &meta_ptr->meta,
                     &(finl_meta.meta),
                     new_meta.meta);
             COMPILER_MEMORY_FENCE;
+            //TODO:for test
+//            auto off = meta_ptr->GetOffset();
+//            auto comm = meta_ptr->GetTxnCommitId();
+//            auto k = meta_ptr->GetKeyLength();
+//            auto i_ = meta_ptr->IsInserting();
 
             new_meta.SetNextPointer(old_tuple_header);
             bool record_meta_next_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
@@ -780,52 +845,43 @@ ResultType SSNTransactionManager::AbortTransaction(
 
             // gc the new tuple version
             // gc the copy pool record
-            version_block_mng->EnterCleaner( end_commit_id,
+            version_block_mng->EnterCleaner(end_commit_id,
                                             GCVersionType::COMMIT_UPDATE,
                                             new_tuple_header,
-                                            sizeof(TupleHeader),
-                                            table_id,
-                                            block_location);
-            // free the copy pool copy record
-            // if the copy has no dependency txn(read txn), it will be free,
-            // now just make it waiting, when the block location 's count =0
-            // it will be really collected by garbage collector
-            conflict_buffer_pool->Free(record_copy_location_ptr);
+                                            sizeof(TupleHeader));
 
         } else if (tuple_entry.second == RWType::DELETE) {
             //first, copy back to record from copy pool
-            uint64_t record_copy_location = meta_data.GetNextPointer();
+            uint64_t record_copy_location = meta_ptr->GetNextPointer();
 
             EphemeralPool::OverwriteVersionHeader *hdr =
-                    conflict_buffer_pool->GetOversionHeaderComm(record_copy_location).get();
+                    overwritten_buffer_pool->GetOversionHeaderComm(record_copy_location).get();
             if (hdr == nullptr){
                 continue;
             }
             assert(hdr != nullptr);
-            conflict_buffer_pool->UpdateSs(record_copy_location, MAX_CID);
-            conflict_buffer_pool->AddWriters(tuple_entry.first.GetMetaPtrVal(),
-                                             meta_data.GetTxnCommitId(), end_commit_id);
+            overwritten_buffer_pool->UpdateSs(record_copy_location, MAX_CID);
+//            overwritten_buffer_pool->AddWriters(tuple_entry.first.GetMetaPtrVal(),
+//                                             meta_data.GetTxnCommitId(), end_commit_id);
 
             //reset btree record meta, pstamp = old record commit id
             RecordMetadata finl_meta = *meta_ptr;
-            RecordMetadata new_meta = meta_data;
-            new_meta.FinalizeForUpdate(end_commit_id);
+            RecordMetadata new_meta = finl_meta;
+            new_meta.FinalizeForUpdate();
             bool record_meta_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
                     &meta_ptr->meta,
                     &(finl_meta.meta),
                     new_meta.meta);
             assert(record_meta_ret);
-
-            //gc the copy pool record
-            conflict_buffer_pool->Free(record_copy_location);
+            assert(!meta_ptr->IsInserting());
 
         } else if (tuple_entry.second == RWType::INSERT) {
-            auto node_hd_ptr = reinterpret_cast<NodeHeader *>(tuple_entry.first.GetNodeHdPtr());
+//            auto node_hd_ptr = reinterpret_cast<NodeHeader *>(tuple_entry.first.GetNodeHdPtr());
             //first, finalize the Btree delete
             //reset txn info
             //update the btree record metadata
             RecordMetadata finl_meta = *meta_ptr;
-            RecordMetadata new_meta = meta_data;
+            RecordMetadata new_meta = finl_meta;
             new_meta.FinalizeForDelete();
             bool record_meta_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
                     &meta_ptr->meta,
@@ -848,13 +904,12 @@ ResultType SSNTransactionManager::AbortTransaction(
             assert(!meta_ptr->IsInserting());
 
             //add the record location to gc
-            version_block_mng->EnterCleaner( end_commit_id,
-                                            GCVersionType::ABORT_INSERT,
-                                            meta_ptr,
-                                            sizeof(RecordMetadata),
-                                            table_id,
-                                            block_location);
-
+            //no need to gc , does not produce a retiring version
+//            version_block_mng->EnterCleaner( end_commit_id,
+//                                            GCVersionType::ABORT_INSERT,
+//                                            meta_ptr,
+//                                            sizeof(RecordMetadata),
+//                                             );
 
         }else if(tuple_entry.second == RWType::READ){
             //now, if the record is also latest, then update the recordmeta commitid;
@@ -862,14 +917,14 @@ ResultType SSNTransactionManager::AbortTransaction(
             //must be in copy pool, because the writing dependents current read
             auto meta_next = meta_data.GetNextPointer();
             std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr =
-                    conflict_buffer_pool->GetOversionHeaderComm(meta_next);
+                    overwritten_buffer_pool->GetOversionHeaderComm(meta_next);
             if(hdr != nullptr){
                 //has read the next or record has been overwriten,
                 // update copy record
 //                assert(meta_ptr->IsInserting());
                 //decrease count, if count <= 0, copy pool
                 //will free the location
-                conflict_buffer_pool->DecreaseWRCount(meta_next);
+                overwritten_buffer_pool->DecreaseWRCount(meta_next);
             }
         }
     }

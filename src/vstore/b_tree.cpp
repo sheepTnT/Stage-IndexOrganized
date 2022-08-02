@@ -4,10 +4,12 @@
 
 #include "../include/vstore/b_tree.h"
 #include "../include/common/raw_atomics.h"
+#include "record_location.cpp"
 
 namespace mvstore {
 
-thread_local size_t num_rw_ops = 0;
+//thread_local size_t num_rw_ops = 0;
+static std::shared_ptr<RecordIndirectionArray> record_location_array;
 //==========================================================
 //-------------------------BaseNode
 //==========================================================
@@ -24,6 +26,16 @@ RecordMetadata BaseNode::SearchRecordMeta(const char *key, uint32_t key_size,
             continue;
         }
         char *current_key = GetKey(current);
+        //TODO: for test
+//        uint64_t curret1 = *reinterpret_cast<const uint64_t *>(current_key);
+//        uint64_t curret2 = *reinterpret_cast<const uint64_t *>(current_key+8);
+//        auto comm = current.GetTxnCommitId();
+//        auto len = current.GetKeyLength();
+//        auto off = current.GetOffset();
+//        auto is_i = current.IsInserting();
+//        auto m = current.meta;
+//        LOG_DEBUG("current key : %lu, %lu", curret1,curret2);
+
         assert(current_key || !is_leaf);
         auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
         if (cmp_result == 0) {
@@ -45,6 +57,16 @@ RecordMetadata BaseNode::SearchRecordMeta(const char *key, uint32_t key_size,
             //is for update
             auto current_size = current.GetKeyLength();
             char *current_key = GetKey(current);
+            //TODO:for test
+//            uint64_t curret1 = *reinterpret_cast<const uint64_t *>(current_key);
+//            uint64_t curret2 = *reinterpret_cast<const uint64_t *>(current_key+8);
+//            auto comm = current.GetTxnCommitId();
+//            auto len = current.GetKeyLength();
+//            auto off = current.GetOffset();
+//            auto is_i = current.IsInserting();
+//            auto m = current.meta;
+//            LOG_DEBUG("current key : %lu, %lu", curret1,curret2);
+
             if (current_size == key_size &&
                 KeyCompare(key, key_size, current_key, current_size) == 0) {
                 if (out_metadata_ptr) {
@@ -77,6 +99,7 @@ bool BaseNode::Freeze() {
             &(&this->GetHeader()->status)->word,
             &(expected.word),
             expected.Freeze().word);
+    COMPILER_MEMORY_FENCE;
 
     return ret;
 }
@@ -529,10 +552,16 @@ bool InternalNode::PrepareForSplit(
         return false;
     }
 
-    return parent->PrepareForSplit(stack, split_threshold, separator_key,
+    auto parent_split_ret = parent->PrepareForSplit(stack, split_threshold, separator_key,
                                    separator_key_size, (uint64_t) node_l,
                                    (uint64_t) node_r, new_node, backoff, commit_id,
                                    inner_node_pool);
+    //after parent split
+    // erase leaf node and inner node's old parent
+//    if (parent_split_ret){
+//        inner_node_pool->Erase(this->GetSegmentIndex());
+//    }
+    return parent_split_ret;
 }
 
 void InternalNode::DeleteRecord(uint32_t meta_to_update, uint64_t new_child_ptr, uint32_t payload_size,
@@ -608,6 +637,11 @@ uint32_t InternalNode::GetChildIndex(const char *key, uint16_t key_size,
         auto meta = record_metadata[mid];
         char *record_key = nullptr;
         GetRawRecord(meta, nullptr, &record_key, nullptr);
+
+        //TODO:for test
+//        uint64_t ke = *reinterpret_cast<const uint64_t *>(record_key);
+//        uint64_t curr = *reinterpret_cast<const uint64_t *>(key);
+
         auto cmp = KeyCompare(key, key_size, record_key, meta.GetKeyLength());
         if (cmp == 0) {
             // Key exists
@@ -741,7 +775,8 @@ void LeafNode::New(LeafNode **mem, uint32_t node_size, DramBlockPool *leaf_node_
 ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, const char *payload,
                             uint32_t payload_size,
                             RecordMetadata **meta, cid_t commit_id,
-                            uint32_t split_threshold) {
+                            uint32_t split_threshold,
+                            RecordLocation **record_location) {
     uint32_t retry_count =0;
     retry:
     NodeHeader::StatusWord expected_status = header.GetStatus();
@@ -803,6 +838,12 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, const char *payl
             &(expected_meta.meta),
             desired_meta.meta);
     COMPILER_MEMORY_FENCE;
+    //record the physical location
+//    int offset_hd = reinterpret_cast<char *>(this) - reinterpret_cast<char *>(this->GetHeader());
+    (*record_location)->node_header_ptr = reinterpret_cast<uint64_t>(this->GetHeader());
+    (*record_location)->record_meta_ptr = reinterpret_cast<uint64_t>(meta_ptr);
+    meta_ptr->SetLocationPtr(*record_location);
+
 
     if (!node_header_ret || !record_meta_ret) {
         if (retry_count >3){
@@ -867,8 +908,10 @@ ReturnCode LeafNode::FinalizeInsert(RecordMetadata *rm_meta, uint64_t offset,
             &rm_meta->meta,
             &(finl_meta.meta),
             new_meta.meta);
+    COMPILER_MEMORY_FENCE;
 
     assert(record_meta_ret);
+    assert(!rm_meta->IsInserting());
 
     return ReturnCode::Ok();
 }
@@ -898,7 +941,7 @@ ReturnCode LeafNode::FinalizeUpdate(RecordMetadata *rm_meta, uint64_t commit_id,
 
     assert(record_meta_ret);
 
-    buffer_record->Free(copy_loc);
+//    buffer_record->Free(copy_loc);
 
     return ReturnCode::Ok();
 }
@@ -978,13 +1021,15 @@ ReturnCode LeafNode::Update(const char *key, uint16_t key_size, const char *delt
         return ReturnCode::NodeFrozen();
     }
 
+//    uint32_t retry2_count =0;
+//    retry2:
     RecordMetadata *meta_ptr = nullptr;
     auto metadata = SearchRecordMeta(key, key_size, meta_upt, is_for_update);
     meta_ptr =  (*meta_upt);
 
     if (metadata.IsVacant()) {
         return ReturnCode::NotFound();
-    }else if (metadata.IsInserting() && !is_for_update){
+    }else if (meta_ptr->IsInserting() && !is_for_update){
         return ReturnCode::WriteDirty();
     }
 
@@ -1011,45 +1056,56 @@ ReturnCode LeafNode::Update(const char *key, uint16_t key_size, const char *delt
         return ReturnCode::NotNeededUpdate();
     }
 
+    NodeHeader::StatusWord desired_status = old_status;
+
     if (is_for_update){
         //if the version is insert by current transaction
         CopyPayload(record_key, metadata, delta, schema, columns);
     }else{
-        //copy the old to the temp location, payload
-        uint64_t rd_copy_location = buffer_record->Allocate(reinterpret_cast<char *>(&header),
-                                                            record_key,
-                                                            meta_ptr->next_ptr,
-                                                            metadata.GetKeyLength(),
-                                                            value_size,
-                                                            commit_id,
-                                                            meta_ptr->GetTxnCommitId());
-        char *target_loc = reinterpret_cast<char *>(rd_copy_location);
-        std::memcpy(target_loc, record_key, metadata.GetKeyLength());
-        std::memcpy(target_loc+metadata.GetKeyLength(),record_key+metadata.GetPaddedKeyLength(), value_size);
+        //make sure the status and record meta is not changed
+        bool node_header_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
+                &(&header.status)->word,
+                &(old_status.word),
+                desired_status.word);
+
+        if (!node_header_ret){
+            return ReturnCode::CASFailure();
+        }
 
         //update the control task = is inserting
         before_meta.PrepareForUpdate();
+        bool new_meta_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
+                &meta_ptr->meta,
+                &(metadata.meta),
+                before_meta.meta);
+        COMPILER_MEMORY_FENCE;
+        if (!new_meta_ret){
+            return ReturnCode::CASFailure();
+        }
+
+        //copy the old to the temp location, payload
+        auto rd_copy = buffer_record->Allocate(reinterpret_cast<char *>(&header),
+                                               record_key,
+                                               meta_ptr->next_ptr,
+                                               metadata.GetKeyLength(),
+                                               value_size,
+                                               commit_id,
+                                               meta_ptr->GetTxnCommitId());
+        uint64_t rd_copy_location = rd_copy.second;
+        char *target_loc = reinterpret_cast<char *>(rd_copy_location);
+        VSTORE_MEMCPY(target_loc, record_key, metadata.GetKeyLength());
+        VSTORE_MEMCPY(target_loc+metadata.GetKeyLength(),record_key+metadata.GetPaddedKeyLength(), value_size);
         //set next = copy record, then other concurrent txns read copy
         before_meta.SetNextPointer(rd_copy_location);
-
-        //set next = copy record, then other concurrent txns read copy
         bool new_meta_next = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
                 &meta_ptr->next_ptr,
                 &(metadata.next_ptr),
                 before_meta.next_ptr);
         COMPILER_MEMORY_FENCE;
 
-        bool new_meta_ret = assorted::raw_atomic_compare_exchange_strong<uint64_t>(
-                &meta_ptr->meta,
-                &(metadata.meta),
-                before_meta.meta);
-        COMPILER_MEMORY_FENCE;
-
-        if(!(new_meta_ret && new_meta_next)){
-            return ReturnCode::CASFailure();
-        }
-        assert(new_meta_ret);
         assert(new_meta_next);
+        assert(node_header_ret);
+        assert(new_meta_ret);
         assert(meta_ptr->IsInserting());
         assert(meta_ptr->GetNextPointer() == rd_copy_location);
 
@@ -1091,12 +1147,13 @@ ReturnCode LeafNode::Delete(const char *key, uint16_t key_size, uint32_t value_s
     char *record_payload = nullptr;
     GetRawRecord(metadata, &record_key, &record_payload);
 
-    rd_copy_location = buffer_record->Allocate(reinterpret_cast<char *>(&header),
+    auto rd_copy= buffer_record->Allocate(reinterpret_cast<char *>(&header),
                                                record_key,
                                                meta_ptr->next_ptr,
                                                metadata.GetKeyLength() , value_size,
                                                commit_id,
                                                meta_ptr->GetTxnCommitId());
+    rd_copy_location = rd_copy.second;
     char *target_loc = reinterpret_cast<char *>(rd_copy_location);
     std::memcpy(target_loc, record_key, metadata.GetKeyLength());
     std::memcpy(target_loc+metadata.GetKeyLength(), record_key+metadata.GetPaddedKeyLength(),  value_size);
@@ -1186,9 +1243,9 @@ ReturnCode LeafNode::RangeScanBySize(const char *key1, uint32_t size1, uint32_t 
             int cmp = KeyCompare(key1, size1, GetKey(*curr_meta), curr_meta->GetKeyLength());
             if (cmp <= 0) {
                 Record *ret_rcd;
-                RecordMeta record_meta(reinterpret_cast<uint64_t>(this), schema.table_id, *curr_meta);
-                record_meta.SetMetaPtr(reinterpret_cast<uint64_t>(curr_meta));
-                record_meta.SetNodeHdPtr(reinterpret_cast<uint64_t>(this->GetHeader()));
+                RecordMeta record_meta(*curr_meta);
+//                record_meta.SetMetaPtr(reinterpret_cast<uint64_t>(curr_meta));
+//                record_meta.SetNodeHdPtr(reinterpret_cast<uint64_t>(this->GetHeader()));
                 record_meta.SetTotalSize(curr_meta->GetPaddedKeyLength()+payload_size);
 
                 ret_rcd = Record::New(record_meta, this, payload_size);
@@ -1389,6 +1446,12 @@ void LeafNode::CopyFrom(LeafNode *node,
     uint16_t nrecords = 0;
     for (auto it = begin_it; it != end_it; ++it) {
         auto meta = *it;
+        //insert transaction abort, it will reset the record meta =0,
+        //so this record need to be deleted and ignored
+        if (meta.meta == 0){
+            continue;
+        }
+
         char *payload = 0;
         char *key;
         node->GetRawRecord(meta, &key, &payload);
@@ -1399,10 +1462,22 @@ void LeafNode::CopyFrom(LeafNode *node,
         assert(offset >= total_len);
         offset -= total_len;
         char *dest_ptr = reinterpret_cast<char *>(this) + offset;
-        memcpy(dest_ptr, key, total_len);
+        VSTORE_MEMCPY(dest_ptr, key, total_len);
+
 
         auto key_len = meta.GetKeyLength();
-        this->FinalizeInsert(&record_metadata[nrecords], offset, key_len, commit_id);
+        this->FinalizeInsert(&record_metadata[nrecords], offset, key_len, meta.GetTxnCommitId());
+        RecordLocation *loc = meta.GetLocationPtr();
+        (&record_metadata[nrecords])->SetLocationPtr(loc);
+        (&record_metadata[nrecords])->SetNextPointer(meta.GetNextPointer());
+//        this->FinalizeInsert(&record_metadata[nrecords], offset, key_len, commit_id);
+        //update the physical location pointer of the record meta
+        RecordLocation new_loc(reinterpret_cast<uint64_t>(this->GetHeader()),
+                               reinterpret_cast<uint64_t>(&record_metadata[nrecords]));
+        RecordMetadata *meta_ptr = &record_metadata[nrecords];
+        auto res = AtomicUpdateRecordLocation(reinterpret_cast<void *>(meta_ptr), new_loc);
+
+
 
         ++nrecords;
     }
@@ -1430,6 +1505,9 @@ bool LeafNode::PrepareForSplit(Stack &stack, uint32_t split_threshold,
                                InternalNode **new_parent, bool backoff,
                                DramBlockPool *leaf_node_pool,
                                InnerNodeBuffer *inner_node_pool) {
+    if (!header.status.IsFrozen()){
+        return false;
+    }
     assert(header.GetStatus().GetRecordCount() > 2);
 
     // Prepare new nodes: a parent node, a left leaf and a right leaf
@@ -1437,7 +1515,6 @@ bool LeafNode::PrepareForSplit(Stack &stack, uint32_t split_threshold,
     LeafNode::New(right, this->header.size, leaf_node_pool);
 
     thread_local std::vector<RecordMetadata> meta_vec;
-//    std::vector<RecordMetadata> meta_vec;
     meta_vec.clear();
 
     uint32_t total_size = SortMetadataByKey(meta_vec, true, payload_size);
@@ -1497,6 +1574,7 @@ bool LeafNode::PrepareForSplit(Stack &stack, uint32_t split_threshold,
                 reinterpret_cast<uint64_t>(node_left), reinterpret_cast<uint64_t>(node_right),
                 new_parent, backoff, commit_id, inner_node_pool);
     }
+
 }
 
 ReturnCode LeafNode::Consolidate(uint32_t payload_size, cid_t commit_id,
@@ -1643,23 +1721,27 @@ ReturnCode BTree::Insert(const char *key, uint16_t key_size, const char *payload
     thread_local Stack stack;
     stack.tree = this;
     uint64_t freeze_retry = 0;
+    uint32_t freeze_release = 0;
 
     while (true) {
         RecordMetadata *meta;
         stack.Clear();
 
         LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+        //get a location to hold the physical location of the record meta
+        RecordLocation *record_location = nullptr;
+        RecordIndirectLocation(&record_location);
 
         // Try to insert to the leaf node
         auto rc = node->Insert(key, key_size, payload, parameters.payload_size,
-                               &meta, commit_id, parameters.split_threshold);
+                               &meta, commit_id, parameters.split_threshold,
+                               &record_location);
         if (rc.IsOk()) {
 
-              *inrt_meta = RecordMeta(reinterpret_cast<uint64_t>(node), this->schema.table_id, *meta);
-              (*inrt_meta).SetMetaPtr(reinterpret_cast<uint64_t>(meta));
-              (*inrt_meta).SetNodeHdPtr(reinterpret_cast<uint64_t>(node->GetHeader()));
-              (*inrt_meta).SetTotalSize(meta->GetPaddedKeyLength()+parameters.payload_size);
-
+            *inrt_meta = RecordMeta(*meta);
+            (*inrt_meta).SetTotalSize(meta->GetPaddedKeyLength()+parameters.payload_size);
+//              (*inrt_meta).SetMetaPtr(reinterpret_cast<uint64_t>(meta));
+//              (*inrt_meta).SetNodeHdPtr(reinterpret_cast<uint64_t>(node->GetHeader()));
 
             return rc;
         }
@@ -1689,8 +1771,8 @@ ReturnCode BTree::Insert(const char *key, uint16_t key_size, const char *payload
         // 2. We have a parent but no grandparent - install [parent] as the new root
         // 3. We have a grandparent - update the child pointer in the grandparent
         //    to point to the new [parent] (might further cause splits up the tree)
-        char *b_r ;
-        char *b_l ;
+        char *b_r = nullptr;
+        char *b_l = nullptr;
         char *b_pt ;
         LeafNode **ptr_r = reinterpret_cast<LeafNode **>(&b_r);
         LeafNode **ptr_l = reinterpret_cast<LeafNode **>(&b_l);
@@ -1714,10 +1796,14 @@ ReturnCode BTree::Insert(const char *key, uint16_t key_size, const char *payload
                 stack, parameters.split_threshold, parameters.payload_size, commit_id,
                    ptr_l, ptr_r, ptr_parent, backoff , leaf_node_pool, inner_node_pool);
         if (!should_proceed) {
-            VSTORE_MEMSET(reinterpret_cast<char *>(b_r), 0 , parameters.leaf_node_size);
-            this->leaf_node_pool->Release(reinterpret_cast<DramBlock *>(b_r));
-            VSTORE_MEMSET(reinterpret_cast<char *>(b_l), 0 , parameters.leaf_node_size);
-            this->leaf_node_pool->Release(reinterpret_cast<DramBlock *>(b_l));
+            if (b_r != nullptr){
+                VSTORE_MEMSET(b_r, 0 , parameters.leaf_node_size);
+                this->leaf_node_pool->Release(reinterpret_cast<DramBlock *>(b_r));
+            }
+            if (b_l != nullptr){
+                VSTORE_MEMSET(b_l, 0 , parameters.leaf_node_size);
+                this->leaf_node_pool->Release(reinterpret_cast<DramBlock *>(b_l));
+            }
 //            this->inner_node_pool->Erase(b_pt);
             // free memory allocated in ptr_l, ptr_r, and ptr_parent, to the pool
             continue;
@@ -1758,7 +1844,28 @@ ReturnCode BTree::Insert(const char *key, uint16_t key_size, const char *payload
             }
 
         }
+
+        if (should_proceed){
+            //after split, release the old leaf node
+            bool frozen_by_rel = false;
+            while (!node->IsFrozen() && ++freeze_release <= MAX_FREEZE_RETRY) {
+                frozen_by_rel = node->Freeze();
+                VSTORE_MEMSET(reinterpret_cast<char *>(node), 0 , parameters.leaf_node_size);
+                this->leaf_node_pool->Release(reinterpret_cast<DramBlock *>(node));
+            }
+
+        }
+        if (old_parent) {
+            //1.leaf node's old parent has not been split
+            //  just be swapped by new parent
+            //2.leaf node's old parent has been popped during the split
+            //  there is only grand parent node left in the stack
+            //3.if there is no grand parent, it does not need to erase, because
+            //  old parent has been popped
+            this->inner_node_pool->Erase(old_parent->GetSegmentIndex());
+        }
     }
+
 }
 
 //template<class Key, class T>
@@ -1773,7 +1880,37 @@ bool BTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr) {
 
     return ret;
 }
+void BTree::RecordIndirectLocation(RecordLocation **location){
+    //the pointer point to the reference of the offset
+    size_t indirection_offset = INVALID_INDIRECTION_OFFSET;
 
+    while (true) {
+        auto active_indirection_array = record_location_array;
+        indirection_offset = active_indirection_array->AllocateIndirection();
+
+        if (indirection_offset != INVALID_INDIRECTION_OFFSET) {
+            *location = active_indirection_array->GetIndirectionByOffset(indirection_offset);
+            break;
+        }
+    }
+
+
+    if (indirection_offset == INDIRECTION_ARRAY_MAX_SIZE - 1) {
+        AddDefaultRecordIndirectionArray();
+    }
+}
+oid_t BTree::AddDefaultRecordIndirectionArray() {
+    auto &manager = Manager::GetInstance();
+    oid_t indirection_array_id = manager.GetNextRecordIndirectionArrayId();
+
+    std::shared_ptr<RecordIndirectionArray> indirection_array(
+            new RecordIndirectionArray(indirection_array_id));
+    manager.AddRecordIndirectionArray(indirection_array_id, indirection_array);
+
+    record_location_array = indirection_array;
+
+    return indirection_array_id;
+}
 //template<class Key, class T>
 std::unique_ptr<Record> BTree::Read(const char *key, uint16_t key_size,
                                     cid_t commit_id, bool is_for_update) {
@@ -1789,13 +1926,14 @@ std::unique_ptr<Record> BTree::Read(const char *key, uint16_t key_size,
 
     if (rc.IsOk()) {
 
-        RecordMeta meta_rd(reinterpret_cast<uint64_t>(node), this->schema.table_id, *meta);
-        meta_rd.SetMetaPtr(reinterpret_cast<uint64_t>(meta));
-        meta_rd.SetNodeHdPtr(reinterpret_cast<uint64_t>(node->GetHeader()));
+//        RecordMeta meta_rd(reinterpret_cast<uint64_t>(node), this->schema.table_id, *meta);
+//        meta_rd.SetMetaPtr(reinterpret_cast<uint64_t>(meta));
+//        meta_rd.SetNodeHdPtr(reinterpret_cast<uint64_t>(node->GetHeader()));
+        RecordMeta meta_rd(*meta);
         meta_rd.SetTotalSize(meta->GetPaddedKeyLength()+parameters.payload_size);
 
 
-        if(meta->IsInserting() && is_for_update == false){
+        if(meta->IsInserting() && !is_for_update){
             uint64_t copy_location = meta->next_ptr;
             //if no one is updateing current record
             //if some one is updateing current record and they are in the same transaction
@@ -1803,9 +1941,9 @@ std::unique_ptr<Record> BTree::Read(const char *key, uint16_t key_size,
             if(copy_location != 0){
                 //if can not find the copy, then it may be going to commit
                 // retry the current read
-                auto ret_hd = conflict_buffer_->GetOversionHeader(copy_location);
+                auto ret_hd = overwritten_buffer_->GetOversionHeader(copy_location);
                 if(ret_hd != nullptr){
-                    auto next_tuple = conflict_buffer_->GetNext(copy_location);
+                    auto next_tuple = overwritten_buffer_->GetNext(copy_location);
 //                    LOG_DEBUG("NextTuplePtr, %zu", next_tuple);
                     meta_rd.SetNextTuplePtr(next_tuple);
                     meta_rd.SetCstamp(ret_hd->GetCstamp());
@@ -1814,7 +1952,13 @@ std::unique_ptr<Record> BTree::Read(const char *key, uint16_t key_size,
                     record->SetCstamp(ret_hd->GetCstamp());
                     //track the readers on the version
                     ret_hd->AddReader(commit_id);
+
+//                    LOG_DEBUG("btree read copy record success, table name %s.", this->schema.table_name);
+                } else{
+                    LOG_DEBUG("btree read copy fail, table name %s.", this->schema.table_name);
                 }
+            } else{
+                LOG_DEBUG("get the copy location fail.");
             }
         } else{
 //            LOG_DEBUG("NextTuplePtr, %zu", meta_rd.meta_data.GetNextPointer());
@@ -1823,7 +1967,11 @@ std::unique_ptr<Record> BTree::Read(const char *key, uint16_t key_size,
             record = Record::New(meta_rd, node, parameters.payload_size);
             //for the latest version v_pstamp=v_cstamp
             record->SetCstamp(commit_id);
+
+//            LOG_DEBUG("btree read latest record success.");
         }
+    } else{
+        LOG_DEBUG("btree read fail, there is no record, rcode:%d, ",rc.rc );
     }
 
     return  std::unique_ptr<Record> (record);
@@ -1841,15 +1989,17 @@ ReturnCode BTree::Update(const char *key, uint16_t key_size,const char * delta,
         if (node == nullptr) {
             return ReturnCode::NotFound();
         }
+
+        //this meta_upt dose not contain the update info(location ptr and next ptr)
         rc = node->Update(key, key_size, delta, columns, parameters.payload_size,
-                          &meta_upt, commit_id, is_for_update, conflict_buffer_, this->schema);
+                          &meta_upt, commit_id, is_for_update, overwritten_buffer_, this->schema);
 
         if (rc.IsOk()){
 
-            *meta_upt_ = RecordMeta(reinterpret_cast<uint64_t>(node), this->schema.table_id, *meta_upt);
-
-            (*meta_upt_).SetMetaPtr(reinterpret_cast<uint64_t>(meta_upt));
-            (*meta_upt_).SetNodeHdPtr(reinterpret_cast<uint64_t>(node->GetHeader()));
+//            *meta_upt_ = RecordMeta(reinterpret_cast<uint64_t>(node), this->schema.table_id, *meta_upt);
+//            (*meta_upt_).SetMetaPtr(reinterpret_cast<uint64_t>(meta_upt));
+//            (*meta_upt_).SetNodeHdPtr(reinterpret_cast<uint64_t>(node->GetHeader()));
+            *meta_upt_ = RecordMeta(*meta_upt);
             (*meta_upt_).SetTotalSize(meta_upt->GetPaddedKeyLength()+parameters.payload_size);
         }
 
@@ -1895,14 +2045,14 @@ ReturnCode BTree::Delete(const char *key, uint16_t key_size, RecordMeta *meta_de
             return ReturnCode::NotFound();
         }
         rc = node->Delete(key, key_size, parameters.payload_size, &meta_del,
-                          tuple_hdr, is_for_update, commit_id, conflict_buffer_);
+                          tuple_hdr, is_for_update, commit_id, overwritten_buffer_);
 
         if (rc.IsOk()){
 
-            *meta_del_ = RecordMeta(reinterpret_cast<uint64_t>(node), this->schema.table_id, *meta_del);
-
-            (*meta_del_).SetMetaPtr(reinterpret_cast<uint64_t>(meta_del));
-            (*meta_del_).SetNodeHdPtr(reinterpret_cast<uint64_t>(node->GetHeader()));
+//            *meta_del_ = RecordMeta(reinterpret_cast<uint64_t>(node), this->schema.table_id, *meta_del);
+//            (*meta_del_).SetMetaPtr(reinterpret_cast<uint64_t>(meta_del));
+//            (*meta_del_).SetNodeHdPtr(reinterpret_cast<uint64_t>(node->GetHeader()));
+            *meta_del_ = RecordMeta(*meta_del);
             (*meta_del_).SetTotalSize(meta_del->GetPaddedKeyLength()+parameters.payload_size);
         }
 
@@ -1961,7 +2111,7 @@ ReturnCode BTree::FinalizeUpdate(RecordMetadata *rm_meta, cid_t commit_id ){
 
     assert(record_meta_ret);
 
-    conflict_buffer_->Free(copy_loc);
+//    overwritten_buffer_->Free(copy_loc);
 
     return ReturnCode::Ok();
 }
@@ -1985,7 +2135,7 @@ ReturnCode BTree::FinalizeDelete(RecordMetadata *rm_meta, cid_t commit_id ){
     //get the pointer pointer to the copy pool location
     uint64_t next_location = rm_meta->GetNextPointer();
     EphemeralPool::OverwriteVersionHeader *over_hd = nullptr;
-    over_hd = conflict_buffer_->GetOversionHeader(next_location).get();
+    over_hd = overwritten_buffer_->GetOversionHeader(next_location).get();
     NodeHeader *node_hd = nullptr;
     node_hd = reinterpret_cast<NodeHeader *>(over_hd->GetNodeHeader());
 
@@ -2003,7 +2153,7 @@ ReturnCode BTree::FinalizeDelete(RecordMetadata *rm_meta, cid_t commit_id ){
 
     assert(record_meta_ret);
 
-    conflict_buffer_->Free(copy_loc);
+//    overwritten_buffer_->Free(copy_loc);
 
     return ReturnCode::Ok();
 }

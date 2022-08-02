@@ -94,11 +94,11 @@ void ParseArguments(int argc, char *argv[], configuration &state) {
     state.scale_factor = 1;
     state.duration = 10;
     state.profile_duration = 1;
-    state.backend_count = 2;
+    state.backend_count = 4;
     state.exp_backoff = false;
     state.affinity = false;
     state.loader_count = 2;
-    state.warehouse_count = 2;
+    state.warehouse_count = 4;
     state.warmup_duration = 0;
     state.scan_rate = 0;
     state.new_order_rate = 1;
@@ -213,7 +213,7 @@ void WriteOutput() {
 //    out << state.scan_latency << "\n";
     LOG_INFO("%s : %d", "warehouse_count", state.warehouse_count);
     LOG_INFO("%s : %d", "backend_count", state.backend_count);
-    LOG_INFO("%s : %lf", "throughput(txns/s)", state.throughput);
+    LOG_INFO("%s : %lf", "throughput(tps)", state.throughput);
     LOG_INFO("%s : %lf", "abort_rate", state.abort_rate);
     LOG_INFO("%s : %lf", "ch_q2* latency(ms)", state.scan_latency);
 

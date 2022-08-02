@@ -65,12 +65,12 @@ static constexpr LSN_T InvalidLSN = std::numeric_limits<LSN_T>::min();
 
 static const size_t default_active_block_count_ = 10;
 
-//static size_t default_blocks = 40*1024;
-//static size_t default_nvm_blocks = 2*1024;
+static size_t default_blocks = 40*1024;
+static size_t default_nvm_blocks = 2*1024;
 
 //64KB*1024*1024/64 =64GB/64=1GB
-static size_t default_blocks = 512*1024;
-static size_t default_nvm_blocks = 30*1024;
+//static size_t default_blocks = 512*1024;
+//static size_t default_nvm_blocks = 30*1024;
 
 
 static bool nvm_emulate = true;
@@ -87,14 +87,6 @@ static void *block_aligned_alloc(std::size_t sz) {
     }
     return ptr;
 }
-
-enum class BackendType {
-    INVALID = INVALID_TYPE_ID,  // invalid backend type
-    MM = 1,                     // on volatile memory
-    NVM = 2,                    // on non-volatile memory
-    SSD = 3,                    // on ssd
-    HDD = 4                     // on hdd
-};
 
 enum class BTreeState {
     FAILED,
@@ -191,13 +183,13 @@ enum class GCVersionType {
 //txn commit id, old version type, table id, version tuple header physical location, header size
 struct TxnVersionInfo{
   uint32_t table_id;
-  uint64_t block_ptr;
+//  uint64_t block_ptr;
   void *tuple_header;
   uint32_t tuple_header_size;
   GCVersionType version_type;
 
     bool operator==(const TxnVersionInfo &rhs) const {
-        return table_id == rhs.table_id && block_ptr == rhs.block_ptr &&
+        return table_id == rhs.table_id &&
                 tuple_header == rhs.tuple_header && version_type == rhs.version_type;
     }
 
@@ -215,7 +207,7 @@ struct TxnVersionInfoHasher {
         boost::hash_combine(seed, item.tuple_header_size);
         boost::hash_combine(seed, item.tuple_header);
         boost::hash_combine(seed, item.table_id);
-        boost::hash_combine(seed, item.block_ptr);
+//        boost::hash_combine(seed, item.block_ptr);
         boost::hash_combine(seed, item.version_type);
 
         return seed;

@@ -515,8 +515,14 @@ void RunWorkload(VersionStore *version_store,  std::vector<uint32_t> &keys) {
 //    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
 //        thread_group.push_back(std::move(std::thread(RunInsertBackend, version_store, thread_itr)));
 //    }
+    thread_group.resize(num_threads + state.vc_start);
     for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
         thread_group.push_back(std::move(std::thread(RunBackend, version_store, thread_itr, keys)));
+    }
+
+    //start version cleanning
+    if (state.vc_start){
+        thread_group.push_back(std::move(std::thread(VersionCleaner::CleanVersionsProcessing, profile_round)));
     }
 
     for (size_t round_id = 0; round_id < profile_round; ++round_id) {

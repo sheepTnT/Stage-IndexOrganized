@@ -585,9 +585,9 @@ void RunWorkload(VersionStore *version_store, EphemeralPool *conflict_buffer) {
             supp_stock_map[w * i % 10000].push_back(std::make_pair((w-1), (i-1)));
 
     // Execute the workload to build the log
-    std::vector<std::thread> thread_group;
     size_t num_threads = state.backend_count;
     sync::ThreadPool the_tp(num_threads);
+    std::vector<std::unique_ptr<std::thread>> threads_pool(num_threads);
 
     abort_counts = new PadInt[num_threads];
     memset(abort_counts, 0, sizeof(PadInt) * num_threads);
@@ -674,22 +674,31 @@ void RunWorkload(VersionStore *version_store, EphemeralPool *conflict_buffer) {
     }
 
     size_t scan_thread = num_threads*state.scan_rate;
-    sync::CountDownLatch latch(num_threads);
-    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
-        if (thread_itr < scan_thread){
-            the_tp.enqueue([thread_itr, &latch, version_store, conflict_buffer, &supp_stock_map]() {
-                //LOG_INFO("Thread %d started", thread_itr);
-                RunScanBackend(thread_itr, version_store, conflict_buffer, supp_stock_map);
-                //LOG_INFO("Thread %d ended", thread_itr);
-                latch.CountDown();
-            });
+//    sync::CountDownLatch latch(num_threads);
+//    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
+//        if (thread_itr < scan_thread){
+//            the_tp.enqueue([thread_itr, &latch, version_store, conflict_buffer, &supp_stock_map]() {
+//                //LOG_INFO("Thread %d started", thread_itr);
+//                RunScanBackend(thread_itr, version_store, conflict_buffer, supp_stock_map);
+//                //LOG_INFO("Thread %d ended", thread_itr);
+//                latch.CountDown();
+//            });
+//        }else{
+//            the_tp.enqueue([thread_itr, &latch, version_store, conflict_buffer]() {
+//                //LOG_INFO("Thread %d started", thread_itr);
+//                RunBackend(thread_itr, version_store, conflict_buffer);
+//                //LOG_INFO("Thread %d ended", thread_itr);
+//                latch.CountDown();
+//            });
+//        }
+//    }
+    for (int thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
+        if (thread_itr < scan_thread) {
+            threads_pool[thread_itr] = std::make_unique<std::thread>(RunScanBackend, thread_itr, version_store,
+                                                     conflict_buffer, supp_stock_map);
         }else{
-            the_tp.enqueue([thread_itr, &latch, version_store, conflict_buffer]() {
-                //LOG_INFO("Thread %d started", thread_itr);
-                RunBackend(thread_itr, version_store, conflict_buffer);
-                //LOG_INFO("Thread %d ended", thread_itr);
-                latch.CountDown();
-            });
+            threads_pool[thread_itr] = std::make_unique<std::thread>(RunBackend, thread_itr, version_store,
+                                                                     conflict_buffer);
         }
     }
 
@@ -718,7 +727,11 @@ void RunWorkload(VersionStore *version_store, EphemeralPool *conflict_buffer) {
     is_running = false;
 
     // Join the threads with the main thread
-    latch.Await();
+//    latch.Await();
+    // Join the threads with the main thread
+    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
+        threads_pool[thread_itr]->join();
+    }
 
     if (enable_pcm){
         std::unique_ptr<SystemCounterState> after_sstate;

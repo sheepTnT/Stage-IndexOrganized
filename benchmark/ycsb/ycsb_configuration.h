@@ -82,6 +82,7 @@ public:
     bool scan_mode;
     bool random_mode;
     double scan_latency=0;
+    bool vc_start=false;
 
     // number of loaders
     int loader_count;

@@ -176,6 +176,8 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
     log_catalog->table_id = 0;
     log_catalog->is_log = true;
     schemas.push_back(log_catalog);
+    uint8_t *key_bitmaps_;
+    Catalog *user_table_catalog;
 
     //CreateWarehouseTable
     {
@@ -193,27 +195,27 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
          CONSTRAINT W_PK_ARRAY PRIMARY KEY (W_ID)
          );
          */
-        Catalog *warehouse_catalog = new Catalog();
-        uint8_t *key_bitmaps_w = new uint8_t[9];
-        key_bitmaps_w[0]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[9];
+        key_bitmaps_[0]=1;
 
-        warehouse_catalog->init("warehouse",9,key_bitmaps_w,8,1,false);
+        user_table_catalog->init("warehouse",9,key_bitmaps_,8,1,false);
 //        warehouse_catalog->add_col("W_ID", 4, "INTEGER");
-        warehouse_catalog->add_col("W_ID", 8, "INTEGER");
-        warehouse_catalog->add_col("W_NAME", 16, "VARCHAR");
-        warehouse_catalog->add_col("W_STREET_1", 32, "VARCHAR");
-        warehouse_catalog->add_col("W_STREET_2", 32, "VARCHAR");
-        warehouse_catalog->add_col("W_CITY", 32, "VARCHAR");
-        warehouse_catalog->add_col("W_STATE", 2, "VARCHAR");
-        warehouse_catalog->add_col("W_ZIP", 9, "VARCHAR");
-        warehouse_catalog->add_col("W_TAX", 8, "VARCHAR");//double
-        warehouse_catalog->add_col("W_YTD", 8, "VARCHAR");//double
-        tpcc_catalogs.push_back(warehouse_catalog);
-        schemas.push_back(warehouse_catalog);
+        user_table_catalog->add_col("W_ID", 8, "INTEGER");
+        user_table_catalog->add_col("W_NAME", 16, "VARCHAR");
+        user_table_catalog->add_col("W_STREET_1", 32, "VARCHAR");
+        user_table_catalog->add_col("W_STREET_2", 32, "VARCHAR");
+        user_table_catalog->add_col("W_CITY", 32, "VARCHAR");
+        user_table_catalog->add_col("W_STATE", 2, "VARCHAR");
+        user_table_catalog->add_col("W_ZIP", 9, "VARCHAR");
+        user_table_catalog->add_col("W_TAX", 8, "VARCHAR");//double
+        user_table_catalog->add_col("W_YTD", 8, "VARCHAR");//double
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = Warehouse::GetPayloadSize();
         param.payload_size = payload_sz;
-        warehouse_table = new WarehouseTable(param, *warehouse_catalog,
+        warehouse_table = new WarehouseTable(param, *user_table_catalog,
                                         leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(0, warehouse_table));
     }
@@ -236,32 +238,32 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
          PRIMARY KEY (D_W_ID,D_ID)
          );
          */
-        Catalog *district_catalog = new Catalog();
-        uint8_t *key_bitmaps_dis = new uint8_t[11];
-        key_bitmaps_dis[0]=1;
-        key_bitmaps_dis[1]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[11];
+        key_bitmaps_[0]=1;
+        key_bitmaps_[1]=1;
 
-        district_catalog->init("district",11,key_bitmaps_dis,16,2,false);
+        user_table_catalog->init("district",11,key_bitmaps_,16,2,false);
 //        district_catalog->add_col("D_W_ID", 4, "INTEGER");
 //        district_catalog->add_col("D_ID", 4, "INTEGER");
-        district_catalog->add_col("D_W_ID", 8, "INTEGER");
-        district_catalog->add_col("D_ID", 8, "INTEGER");
-        district_catalog->add_col("D_NEXT_O_ID", 4, "INTEGER");
-        district_catalog->add_col("D_NAME", 16, "VARCHAR");
-        district_catalog->add_col("D_STREET_1", 32, "VARCHAR");
-        district_catalog->add_col("D_STREET_2", 32, "VARCHAR");
-        district_catalog->add_col("D_CITY", 32, "VARCHAR");
-        district_catalog->add_col("D_STATE", 2, "VARCHAR");
-        district_catalog->add_col("D_ZIP", 9, "VARCHAR");
-        district_catalog->add_col("D_TAX", 8, "VARCHAR");//double
-        district_catalog->add_col("D_YTD", 8, "VARCHAR");//double
+        user_table_catalog->add_col("D_W_ID", 8, "INTEGER");
+        user_table_catalog->add_col("D_ID", 8, "INTEGER");
+        user_table_catalog->add_col("D_NEXT_O_ID", 4, "INTEGER");
+        user_table_catalog->add_col("D_NAME", 16, "VARCHAR");
+        user_table_catalog->add_col("D_STREET_1", 32, "VARCHAR");
+        user_table_catalog->add_col("D_STREET_2", 32, "VARCHAR");
+        user_table_catalog->add_col("D_CITY", 32, "VARCHAR");
+        user_table_catalog->add_col("D_STATE", 2, "VARCHAR");
+        user_table_catalog->add_col("D_ZIP", 9, "VARCHAR");
+        user_table_catalog->add_col("D_TAX", 8, "VARCHAR");//double
+        user_table_catalog->add_col("D_YTD", 8, "VARCHAR");//double
 
-        tpcc_catalogs.push_back(district_catalog);
-        schemas.push_back(district_catalog);
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = District::GetPayloadSize();
         param.payload_size = payload_sz;
-        district_table = new DistrictTable(param, *district_catalog,
+        district_table = new DistrictTable(param, *user_table_catalog,
                                              leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(1, district_table));
     }
@@ -278,23 +280,23 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
          CONSTRAINT I_PK_ARRAY PRIMARY KEY (I_ID)
          );
          */
-        Catalog *item_catalog = new Catalog();
-        uint8_t *key_bitmaps_i = new uint8_t[5];
-        key_bitmaps_i[0]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[5];
+        key_bitmaps_[0]=1;
 
-        item_catalog->init("item",5,key_bitmaps_i,8,3,false);
+        user_table_catalog->init("item",5,key_bitmaps_,8,3,false);
 //        item_catalog->add_col("I_ID", 4, "INTEGER");
-        item_catalog->add_col("I_ID", 8, "INTEGER");
-        item_catalog->add_col("I_IM_ID", 4, "INTEGER");
-        item_catalog->add_col("I_NAME", 32, "VARCHAR");
-        item_catalog->add_col("I_PRICE", 8, "VARCHAR");//double
-        item_catalog->add_col("I_DATA", 64, "VARCHAR");
-        tpcc_catalogs.push_back(item_catalog);
-        schemas.push_back(item_catalog);
+        user_table_catalog->add_col("I_ID", 8, "INTEGER");
+        user_table_catalog->add_col("I_IM_ID", 4, "INTEGER");
+        user_table_catalog->add_col("I_NAME", 32, "VARCHAR");
+        user_table_catalog->add_col("I_PRICE", 8, "VARCHAR");//double
+        user_table_catalog->add_col("I_DATA", 64, "VARCHAR");
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = Item::GetPayloadSize();
         param.payload_size = payload_sz;
-        item_table = new ItemTable(param, *item_catalog,
+        item_table = new ItemTable(param, *user_table_catalog,
                                            leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(2, item_table));
     }
@@ -331,43 +333,43 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
          );
          CREATE INDEX IDX_CUSTOMER ON CUSTOMER (C_W_ID,C_D_ID,C_LAST);
        */
-        Catalog *customer_catalog = new Catalog();
-        uint8_t *key_bitmaps_c = new uint8_t[21];
-        key_bitmaps_c[0]=1;
-        key_bitmaps_c[1]=1;
-        key_bitmaps_c[2]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[21];
+        key_bitmaps_[0]=1;
+        key_bitmaps_[1]=1;
+        key_bitmaps_[2]=1;
 
-        customer_catalog->init("customer",21,key_bitmaps_c,24,4,false);
+        user_table_catalog->init("customer",21,key_bitmaps_,24,4,false);
 //        customer_catalog->add_col("C_W_ID", 4, "INTEGER");
 //        customer_catalog->add_col("C_D_ID", 4, "INTEGER");
 //        customer_catalog->add_col("C_ID", 4, "INTEGER");
-        customer_catalog->add_col("C_W_ID", 8, "INTEGER");
-        customer_catalog->add_col("C_D_ID", 8, "INTEGER");
-        customer_catalog->add_col("C_ID", 8, "INTEGER");
-        customer_catalog->add_col("C_SINCE", 8, "LONG INTEGER");//timestamp
-        customer_catalog->add_col("C_PAYMENT_CNT", 4, "INTEGER");
-        customer_catalog->add_col("C_DELIVERY_CNT", 4, "INTEGER");
-        customer_catalog->add_col("C_FIRST", 32, "VARCHAR");
-        customer_catalog->add_col("C_MIDDLE", 2, "VARCHAR");
-        customer_catalog->add_col("C_LAST", 32, "VARCHAR");
-        customer_catalog->add_col("C_STREET_1", 32, "VARCHAR");
-        customer_catalog->add_col("C_STREET_2", 32, "VARCHAR");
-        customer_catalog->add_col("C_CITY", 32, "VARCHAR");
-        customer_catalog->add_col("C_STATE", 2, "VARCHAR");
-        customer_catalog->add_col("C_ZIP", 9, "VARCHAR");
-        customer_catalog->add_col("C_PHONE", 32, "VARCHAR");
-        customer_catalog->add_col("C_CREDIT", 2, "VARCHAR");
-        customer_catalog->add_col("C_CREDIT_LIM", 8, "VARCHAR");//float
-        customer_catalog->add_col("C_DISCOUNT", 8, "VARCHAR");//float
-        customer_catalog->add_col("C_BALANCE", 8, "VARCHAR");//float
-        customer_catalog->add_col("C_YTD_PAYMENT", 8, "VARCHAR");//float
-        customer_catalog->add_col("C_DATA", 500, "VARCHAR");
-        tpcc_catalogs.push_back(customer_catalog);
-        schemas.push_back(customer_catalog);
+        user_table_catalog->add_col("C_W_ID", 8, "INTEGER");
+        user_table_catalog->add_col("C_D_ID", 8, "INTEGER");
+        user_table_catalog->add_col("C_ID", 8, "INTEGER");
+        user_table_catalog->add_col("C_SINCE", 8, "LONG INTEGER");//timestamp
+        user_table_catalog->add_col("C_PAYMENT_CNT", 4, "INTEGER");
+        user_table_catalog->add_col("C_DELIVERY_CNT", 4, "INTEGER");
+        user_table_catalog->add_col("C_FIRST", 32, "VARCHAR");
+        user_table_catalog->add_col("C_MIDDLE", 2, "VARCHAR");
+        user_table_catalog->add_col("C_LAST", 32, "VARCHAR");
+        user_table_catalog->add_col("C_STREET_1", 32, "VARCHAR");
+        user_table_catalog->add_col("C_STREET_2", 32, "VARCHAR");
+        user_table_catalog->add_col("C_CITY", 32, "VARCHAR");
+        user_table_catalog->add_col("C_STATE", 2, "VARCHAR");
+        user_table_catalog->add_col("C_ZIP", 9, "VARCHAR");
+        user_table_catalog->add_col("C_PHONE", 32, "VARCHAR");
+        user_table_catalog->add_col("C_CREDIT", 2, "VARCHAR");
+        user_table_catalog->add_col("C_CREDIT_LIM", 8, "VARCHAR");//float
+        user_table_catalog->add_col("C_DISCOUNT", 8, "VARCHAR");//float
+        user_table_catalog->add_col("C_BALANCE", 8, "VARCHAR");//float
+        user_table_catalog->add_col("C_YTD_PAYMENT", 8, "VARCHAR");//float
+        user_table_catalog->add_col("C_DATA", 500, "VARCHAR");
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = Customer::GetPayloadSize();
         param.payload_size = payload_sz;
-        customer_table = new CustomerTable(param, *customer_catalog,
+        customer_table = new CustomerTable(param, *user_table_catalog,
                                        leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(3, customer_table));
 
@@ -393,27 +395,27 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
           D_W_ID)
           );
          */
-        Catalog *history_catalog = new Catalog();
-        uint8_t *key_bitmaps_h = new uint8_t[9];
-        key_bitmaps_h[0]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[9];
+        key_bitmaps_[0]=1;
 
-        history_catalog->init("history",9,key_bitmaps_h,8,5,false);
+        user_table_catalog->init("history",9,key_bitmaps_,8,5,false);
 //        history_catalog->add_col("H_ID", 4, "INTEGER");
-        history_catalog->add_col("H_ID", 8, "INTEGER");
-        history_catalog->add_col("H_C_ID", 4, "INTEGER");
-        history_catalog->add_col("H_C_D_ID", 4, "INTEGER");
-        history_catalog->add_col("H_C_W_ID", 4, "INTEGER");
-        history_catalog->add_col("H_D_ID", 4, "INTEGER");
-        history_catalog->add_col("H_W_ID", 4, "INTEGER");
-        history_catalog->add_col("H_DATE", 8, "LONG INTEGER");//timestamp
-        history_catalog->add_col("H_AMOUNT", 8, "VARCHAR");//float
-        history_catalog->add_col("H_DATA", 32, "VARCHAR");
-        tpcc_catalogs.push_back(history_catalog);
-        schemas.push_back(history_catalog);
+        user_table_catalog->add_col("H_ID", 8, "INTEGER");
+        user_table_catalog->add_col("H_C_ID", 4, "INTEGER");
+        user_table_catalog->add_col("H_C_D_ID", 4, "INTEGER");
+        user_table_catalog->add_col("H_C_W_ID", 4, "INTEGER");
+        user_table_catalog->add_col("H_D_ID", 4, "INTEGER");
+        user_table_catalog->add_col("H_W_ID", 4, "INTEGER");
+        user_table_catalog->add_col("H_DATE", 8, "LONG INTEGER");//timestamp
+        user_table_catalog->add_col("H_AMOUNT", 8, "VARCHAR");//float
+        user_table_catalog->add_col("H_DATA", 32, "VARCHAR");
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = History::GetPayloadSize();
         param.payload_size = payload_sz;
-        history_table = new HistoryTable(param, *history_catalog,
+        history_table = new HistoryTable(param, *user_table_catalog,
                                           leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(4, history_table));
     }
@@ -442,37 +444,37 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
          PRIMARY KEY (S_W_ID,S_I_ID)
          );
          */
-        Catalog *stock_catalog = new Catalog();
-        uint8_t *key_bitmaps_s = new uint8_t[17];
-        key_bitmaps_s[0]=1;
-        key_bitmaps_s[1]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[17];
+        key_bitmaps_[0]=1;
+        key_bitmaps_[1]=1;
 
-        stock_catalog->init("stock",17, key_bitmaps_s,16,6,false);
+        user_table_catalog->init("stock",17, key_bitmaps_,16,6,false);
 //        stock_catalog->add_col("S_W_ID", 4, "INTEGER");
 //        stock_catalog->add_col("S_I_ID", 4, "INTEGER");
-        stock_catalog->add_col("S_W_ID", 8, "INTEGER");
-        stock_catalog->add_col("S_I_ID", 8, "INTEGER");
-        stock_catalog->add_col("S_QUANTITY", 4, "INTEGER");
-        stock_catalog->add_col("S_YTD", 4, "INTEGER");
-        stock_catalog->add_col("S_ORDER_CNT", 4, "INTEGER");
-        stock_catalog->add_col("S_REMOTE_CNT", 4, "INTEGER");
-        stock_catalog->add_col("S_DIST_01", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_02", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_03", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_04", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_05", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_06", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_07", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_08", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_09", 32, "VARCHAR");
-        stock_catalog->add_col("S_DIST_10", 32, "VARCHAR");
-        stock_catalog->add_col("S_DATA", 64, "VARCHAR");
-        tpcc_catalogs.push_back(stock_catalog);
-        schemas.push_back(stock_catalog);
+        user_table_catalog->add_col("S_W_ID", 8, "INTEGER");
+        user_table_catalog->add_col("S_I_ID", 8, "INTEGER");
+        user_table_catalog->add_col("S_QUANTITY", 4, "INTEGER");
+        user_table_catalog->add_col("S_YTD", 4, "INTEGER");
+        user_table_catalog->add_col("S_ORDER_CNT", 4, "INTEGER");
+        user_table_catalog->add_col("S_REMOTE_CNT", 4, "INTEGER");
+        user_table_catalog->add_col("S_DIST_01", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_02", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_03", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_04", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_05", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_06", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_07", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_08", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_09", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DIST_10", 32, "VARCHAR");
+        user_table_catalog->add_col("S_DATA", 64, "VARCHAR");
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = Stock::GetPayloadSize();
         param.payload_size = payload_sz;
-        stock_table = new StockTable(param, *stock_catalog,
+        stock_table = new StockTable(param, *user_table_catalog,
                                           leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(5, stock_table));
     }
@@ -496,30 +498,30 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
          );
          CREATE INDEX IDX_ORDERS ON ORDERS (O_W_ID,O_D_ID,O_C_ID);
          */
-        Catalog *orders_catalog = new Catalog();
-        uint8_t *key_bitmaps_o = new uint8_t[8];
-        key_bitmaps_o[0]=1;
-        key_bitmaps_o[1]=1;
-        key_bitmaps_o[2]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[8];
+        key_bitmaps_[0]=1;
+        key_bitmaps_[1]=1;
+        key_bitmaps_[2]=1;
 
-        orders_catalog->init("orders",8, key_bitmaps_o,24,7,false);
+        user_table_catalog->init("orders",8, key_bitmaps_,24,7,false);
 //        orders_catalog->add_col("O_W_ID", 4, "INTEGER");
 //        orders_catalog->add_col("O_D_ID", 4, "INTEGER");
 //        orders_catalog->add_col("O_ID", 4, "INTEGER");
-        orders_catalog->add_col("O_W_ID", 8, "INTEGER");
-        orders_catalog->add_col("O_D_ID", 8, "INTEGER");
-        orders_catalog->add_col("O_ID", 8, "INTEGER");
-        orders_catalog->add_col("O_C_ID", 4, "INTEGER");
-        orders_catalog->add_col("O_ENTRY_D", 8, "LONG INTEGER");//timestamp
-        orders_catalog->add_col("O_CARRIER_ID", 4, "INTEGER");
-        orders_catalog->add_col("O_OL_CNT", 4, "INTEGER");
-        orders_catalog->add_col("O_ALL_LOCAL", 4, "INTEGER");
-        tpcc_catalogs.push_back(orders_catalog);
-        schemas.push_back(orders_catalog);
+        user_table_catalog->add_col("O_W_ID", 8, "INTEGER");
+        user_table_catalog->add_col("O_D_ID", 8, "INTEGER");
+        user_table_catalog->add_col("O_ID", 8, "INTEGER");
+        user_table_catalog->add_col("O_C_ID", 4, "INTEGER");
+        user_table_catalog->add_col("O_ENTRY_D", 8, "LONG INTEGER");//timestamp
+        user_table_catalog->add_col("O_CARRIER_ID", 4, "INTEGER");
+        user_table_catalog->add_col("O_OL_CNT", 4, "INTEGER");
+        user_table_catalog->add_col("O_ALL_LOCAL", 4, "INTEGER");
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = Order::GetPayloadSize();
         param.payload_size = payload_sz;
-        orders_table = new OrderTable(param, *orders_catalog,
+        orders_table = new OrderTable(param, *user_table_catalog,
                                      leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(6, orders_table));
     }
@@ -536,24 +538,24 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
          ORDERS (O_ID, O_D_ID, O_W_ID)
          );
          */
-        Catalog *new_order_catalog = new Catalog();
-        uint8_t *key_bitmaps_no = new uint8_t[3];
-        key_bitmaps_no[0]=1;
-        key_bitmaps_no[1]=1;
-        key_bitmaps_no[2]=1;
-        new_order_catalog->init("new order",3, key_bitmaps_no,24,8,false);
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[3];
+        key_bitmaps_[0]=1;
+        key_bitmaps_[1]=1;
+        key_bitmaps_[2]=1;
+        user_table_catalog->init("new order",3, key_bitmaps_,24,8,false);
 //        new_order_catalog->add_col("NO_W_ID", 4, "INTEGER");
 //        new_order_catalog->add_col("NO_D_ID", 4, "INTEGER");
 //        new_order_catalog->add_col("NO_O_ID", 4, "INTEGER");
-        new_order_catalog->add_col("NO_W_ID", 8, "INTEGER");
-        new_order_catalog->add_col("NO_D_ID", 8, "INTEGER");
-        new_order_catalog->add_col("NO_O_ID", 8, "INTEGER");
-        tpcc_catalogs.push_back(new_order_catalog);
-        schemas.push_back(new_order_catalog);
+        user_table_catalog->add_col("NO_W_ID", 8, "INTEGER");
+        user_table_catalog->add_col("NO_D_ID", 8, "INTEGER");
+        user_table_catalog->add_col("NO_O_ID", 8, "INTEGER");
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = NewOrder::GetPayloadSize();
         param.payload_size = payload_sz;
-        new_order_table = new NewOrderTable(param, *new_order_catalog,
+        new_order_table = new NewOrderTable(param, *user_table_catalog,
                                       leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(7, new_order_table));
     }
@@ -580,33 +582,33 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
          );
          CREATE INDEX IDX_ORDER_LINE_TREE ON ORDER_LINE (OL_W_ID,OL_D_ID,OL_O_ID);
          */
-        Catalog *order_line_catalog = new Catalog();
-        uint8_t *key_bitmaps_ol = new uint8_t[10];
-        key_bitmaps_ol[0]=1;
-        key_bitmaps_ol[1]=1;
-        key_bitmaps_ol[2]=1;
-        key_bitmaps_ol[3]=1;
-        order_line_catalog->init("order line",10, key_bitmaps_ol,32,9,false);
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[10];
+        key_bitmaps_[0]=1;
+        key_bitmaps_[1]=1;
+        key_bitmaps_[2]=1;
+        key_bitmaps_[3]=1;
+        user_table_catalog->init("order line",10, key_bitmaps_,32,9,false);
 //        order_line_catalog->add_col("OL_W_ID", 4, "INTEGER");
 //        order_line_catalog->add_col("OL_D_ID", 4, "INTEGER");
 //        order_line_catalog->add_col("OL_O_ID", 4, "INTEGER");
 //        order_line_catalog->add_col("OL_NUMBER", 4, "INTEGER");
-        order_line_catalog->add_col("OL_W_ID", 8, "INTEGER");
-        order_line_catalog->add_col("OL_D_ID", 8, "INTEGER");
-        order_line_catalog->add_col("OL_O_ID", 8, "INTEGER");
-        order_line_catalog->add_col("OL_NUMBER", 8, "INTEGER");
-        order_line_catalog->add_col("OL_I_ID", 4, "INTEGER");
-        order_line_catalog->add_col("OL_SUPPLY_W_ID", 4, "INTEGER");
-        order_line_catalog->add_col("OL_DELIVERY_D", 8, "LONG INTEGER");//timestamp
-        order_line_catalog->add_col("OL_QUANTITY", 4, "INTEGER");
-        order_line_catalog->add_col("OL_AMOUNT", 8, "VARCHAR");//float
-        order_line_catalog->add_col("OL_DIST_INFO", 32, "VARCHAR");
-        tpcc_catalogs.push_back(order_line_catalog);
-        schemas.push_back(order_line_catalog);
+        user_table_catalog->add_col("OL_W_ID", 8, "INTEGER");
+        user_table_catalog->add_col("OL_D_ID", 8, "INTEGER");
+        user_table_catalog->add_col("OL_O_ID", 8, "INTEGER");
+        user_table_catalog->add_col("OL_NUMBER", 8, "INTEGER");
+        user_table_catalog->add_col("OL_I_ID", 4, "INTEGER");
+        user_table_catalog->add_col("OL_SUPPLY_W_ID", 4, "INTEGER");
+        user_table_catalog->add_col("OL_DELIVERY_D", 8, "LONG INTEGER");//timestamp
+        user_table_catalog->add_col("OL_QUANTITY", 4, "INTEGER");
+        user_table_catalog->add_col("OL_AMOUNT", 8, "VARCHAR");//float
+        user_table_catalog->add_col("OL_DIST_INFO", 32, "VARCHAR");
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = OrderLine::GetPayloadSize();
         param.payload_size = payload_sz;
-        order_line_table = new OrderLineTable(param, *order_line_catalog,
+        order_line_table = new OrderLineTable(param, *user_table_catalog,
                                             leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(8, order_line_table));
     }
@@ -622,21 +624,21 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
              PRIMARY KEY (r_regionkey)
          );
          */
-        Catalog *region_catalog = new Catalog();
-        uint8_t *key_bitmaps_i = new uint8_t[3];
-        key_bitmaps_i[0]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[3];
+        key_bitmaps_[0]=1;
 
-        region_catalog->init("region",3,key_bitmaps_i,8,10,false);
-        region_catalog->add_col("R_REGIONKEY", 8, "INTEGER");
-        region_catalog->add_col("R_NAME", 55, "VARCHAR");
-        region_catalog->add_col("R_COMMENT", 152, "VARCHAR");
+        user_table_catalog->init("region",3,key_bitmaps_,8,10,false);
+        user_table_catalog->add_col("R_REGIONKEY", 8, "INTEGER");
+        user_table_catalog->add_col("R_NAME", 55, "VARCHAR");
+        user_table_catalog->add_col("R_COMMENT", 152, "VARCHAR");
 
-        tpcc_catalogs.push_back(region_catalog);
-        schemas.push_back(region_catalog);
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = Region::GetPayloadSize();
         param.payload_size = payload_sz;
-        region_table = new RegionTable(param, *region_catalog,
+        region_table = new RegionTable(param, *user_table_catalog,
                                    leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(9, region_table));
     }
@@ -653,22 +655,22 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
             PRIMARY KEY (n_nationkey)
         );
          */
-        Catalog *nation_catalog = new Catalog();
-        uint8_t *key_bitmaps_i = new uint8_t[4];
-        key_bitmaps_i[0]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[4];
+        key_bitmaps_[0]=1;
 
-        nation_catalog->init("nation",4,key_bitmaps_i,8,11,false);
-        nation_catalog->add_col("N_NATIONKEY", 8, "INTEGER");
-        nation_catalog->add_col("N_REGIONKEY", 8, "INTEGER");
-        nation_catalog->add_col("N_NAME", 25, "VARCHAR");
-        nation_catalog->add_col("N_COMMENT", 152, "VARCHAR");
+        user_table_catalog->init("nation",4,key_bitmaps_,8,11,false);
+        user_table_catalog->add_col("N_NATIONKEY", 8, "INTEGER");
+        user_table_catalog->add_col("N_REGIONKEY", 8, "INTEGER");
+        user_table_catalog->add_col("N_NAME", 25, "VARCHAR");
+        user_table_catalog->add_col("N_COMMENT", 152, "VARCHAR");
 
-        tpcc_catalogs.push_back(nation_catalog);
-        schemas.push_back(nation_catalog);
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = Nation::GetPayloadSize();
         param.payload_size = payload_sz;
-        nation_table = new RegionTable(param, *nation_catalog,
+        nation_table = new RegionTable(param, *user_table_catalog,
                                        leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(10, nation_table));
     }
@@ -688,25 +690,25 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
             PRIMARY KEY (su_suppkey)
         );
          */
-        Catalog *supplier_catalog = new Catalog();
-        uint8_t *key_bitmaps_i = new uint8_t[7];
-        key_bitmaps_i[0]=1;
+        user_table_catalog = new Catalog();
+        key_bitmaps_ = new uint8_t[7];
+        key_bitmaps_[0]=1;
 
-        supplier_catalog->init("supplier",7,key_bitmaps_i,8,12,false);
-        supplier_catalog->add_col("SU_SUPPKEY", 8, "INTEGER");
-        supplier_catalog->add_col("SU_NATIONKEY", 8, "INTEGER");
-        supplier_catalog->add_col("SU_ACCTBAL", 8, "VARCHAR");//double
-        supplier_catalog->add_col("SU_NAME", 25, "VARCHAR");
-        supplier_catalog->add_col("SU_ADDRESS", 40, "VARCHAR");
-        supplier_catalog->add_col("SU_PHONE", 15, "VARCHAR");
-        supplier_catalog->add_col("SU_COMMENT", 15, "VARCHAR");
+        user_table_catalog->init("supplier",7,key_bitmaps_,8,12,false);
+        user_table_catalog->add_col("SU_SUPPKEY", 8, "INTEGER");
+        user_table_catalog->add_col("SU_NATIONKEY", 8, "INTEGER");
+        user_table_catalog->add_col("SU_ACCTBAL", 8, "VARCHAR");//double
+        user_table_catalog->add_col("SU_NAME", 25, "VARCHAR");
+        user_table_catalog->add_col("SU_ADDRESS", 40, "VARCHAR");
+        user_table_catalog->add_col("SU_PHONE", 15, "VARCHAR");
+        user_table_catalog->add_col("SU_COMMENT", 15, "VARCHAR");
 
-        tpcc_catalogs.push_back(supplier_catalog);
-        schemas.push_back(supplier_catalog);
+        tpcc_catalogs.push_back(user_table_catalog);
+        schemas.push_back(user_table_catalog);
 
         uint32_t payload_sz = Supplier::GetPayloadSize();
         param.payload_size = payload_sz;
-        supplier_table = new SupplierTable(param, *supplier_catalog,
+        supplier_table = new SupplierTable(param, *user_table_catalog,
                                        leaf_node_pool, inner_node_pool, conflict_buffer);
         database_tables.insert(std::make_pair(11, supplier_table));
     }
@@ -778,7 +780,8 @@ void CreateTPCCDatabase(ParameterSet param, VersionStore *buf_mgr ,
 //        database_tables.insert(std::make_pair(10, orders_skey_table));
 //    }
 
-
+    delete [] key_bitmaps_;
+    delete user_table_catalog;
 
     buf_mgr->Init(schemas);
 }
@@ -1482,9 +1485,11 @@ void LoadNation(VersionStore *version_store, int thread_id) {
 void LoadSupplier(VersionStore *version_store, int thread_id) {
     std::list<uint64_t> retry_rowids;
     auto txn_manager = SSNTransactionManager::GetInstance();
-    auto txn_ctx_supp = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
+    TransactionContext *txn_ctx_supp  ;
 
     for (uint i = 0; i < 10000; i++) {
+        txn_ctx_supp = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
+
         Supplier supplier_tuple = BuildSupplierTuple(i);
 
         uint64_t k_ = i;
@@ -1501,10 +1506,10 @@ void LoadSupplier(VersionStore *version_store, int thread_id) {
         if (ret_code.IsRetryFailure() || ret_code.IsCASFailure()){
             retry_rowids.push_back(k_);
         }
-    }
 
-    auto res = txn_manager->CommitTransaction(txn_ctx_supp);
-    assert(res == ResultType::SUCCESS);
+        auto res_c = txn_manager->CommitTransaction(txn_ctx_supp);
+        assert(res_c == ResultType::SUCCESS);
+    }
 
     //insert retry
     txn_ctx_supp = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
@@ -1526,9 +1531,9 @@ void LoadSupplier(VersionStore *version_store, int thread_id) {
             retry_rowids.pop_front();
         }
     }
-    res = txn_manager->CommitTransaction(txn_ctx_supp);
+    auto res_retry = txn_manager->CommitTransaction(txn_ctx_supp);
     LOG_INFO("supplier btree insert, current thread id :%d transaction has finished.", thread_id);
-    assert(res == ResultType::SUCCESS);
+    assert(res_retry == ResultType::SUCCESS);
 
     delete txn_ctx_supp;
     txn_ctx_supp = nullptr;
@@ -1537,9 +1542,11 @@ void LoadSupplier(VersionStore *version_store, int thread_id) {
 void LoadItems(VersionStore *version_store, int thread_id) {
     std::list<uint64_t> retry_rowids;
     auto txn_manager = SSNTransactionManager::GetInstance();
-    auto txn_ctx = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
+//    auto txn_ctx = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
+    TransactionContext *txn_ctx;
 
     for (auto item_itr = 0; item_itr < state.item_count; item_itr++) {
+        txn_ctx = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
         Item item_tuple = BuildItemTuple(item_itr);
 
         uint64_t k_ = item_itr;
@@ -1556,12 +1563,16 @@ void LoadItems(VersionStore *version_store, int thread_id) {
         if (ret_code.IsRetryFailure() || ret_code.IsCASFailure()){
             retry_rowids.push_back(k_);
         }
+        auto res_c = txn_manager->CommitTransaction(txn_ctx);
+        assert(res_c == ResultType::SUCCESS);
     }
-    auto res = txn_manager->CommitTransaction(txn_ctx);
-    assert(res == ResultType::SUCCESS);
+//    auto res = txn_manager->CommitTransaction(txn_ctx);
+//    assert(res == ResultType::SUCCESS);
+
+    LOG_DEBUG("insert item retry size: %lu", retry_rowids.size());
 
     //insert retry
-    txn_ctx = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
+    auto txn_ctx_retry = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
     while (!retry_rowids.empty()) {
         uint64_t k_ = retry_rowids.front();
         Item item_tuple = BuildItemTuple(k_);
@@ -1571,7 +1582,7 @@ void LoadItems(VersionStore *version_store, int thread_id) {
                                                 k_item ,
                                                 sizeof(uint64_t),
                                                 item_tuple,
-                                                txn_ctx,
+                                                    txn_ctx_retry,
                                                 version_store);
         auto res = executor.Execute();
         assert(res == true);
@@ -1580,13 +1591,49 @@ void LoadItems(VersionStore *version_store, int thread_id) {
             retry_rowids.pop_front();
         }
     }
-    res = txn_manager->CommitTransaction(txn_ctx);
+    auto res_retry = txn_manager->CommitTransaction(txn_ctx_retry);
     LOG_INFO("item btree insert, current thread id :%d transaction has finished.", thread_id);
-    assert(res == ResultType::SUCCESS);
+    assert(res_retry == ResultType::SUCCESS);
+
+//    for (auto item_id = 0; item_id < state.item_count; item_id++) {
+//        //LOG_DEBUG("getItemInfo: SELECT I_PRICE, I_NAME, I_DATA FROM ITEM WHERE I_ID = %d", item_id);
+//        uint64_t key = item_id;
+//        uint32_t scan_sz = 0;
+//        bool point_lookup = true;
+//        bool is_for_update = false;
+//        auto predicate = nullptr;
+//
+//        const char *k_item = reinterpret_cast<const char *>(&key);
+//        IndexScanExecutor<const char * , Item> executor(item_table,
+//                                                        sizeof(uint64_t),
+//                                                        k_item,
+//                                                        scan_sz,
+//                                                        point_lookup,
+//                                                        predicate,
+//                                                        is_for_update,
+//                                                        txn_ctx,
+//                                                        version_store);
+//
+//        auto res = executor.Execute();
+//        assert(res);
+//        auto &items = executor.GetResults();
+//
+////        if (items.size() != 1) {
+////            LOG_ERROR("getItemInfo return size incorrect : %lu", items.size());
+//////            assert(false);
+////        }
+//        if (items.size() == 1) {
+//            LOG_ERROR("getItemInfo return size incorrect : %lu", items.size());
+//            auto id = items[0]->I_ID;
+//            auto i_im = items[0]->I_IM_ID;
+//            auto i_name = items[0]->I_NAME;
+//            auto i_price = items[0]->I_PRICE;
+//            auto i_data = items[0]->I_DATA;
+//        }
+//    }
 
     delete txn_ctx;
     txn_ctx = nullptr;
-
 }
 
 void LoadWarehouses(VersionStore *version_store, int thread_id,

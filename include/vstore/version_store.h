@@ -22,7 +22,8 @@
 
 namespace mvstore{
 
-typedef CuckooMap<cid_t, std::vector<TxnVersionInfo>> GCSet;
+//for overwritten and retired version cleaning
+typedef CuckooMap<cid_t, std::vector<TxnVersionInfo>> VCSet;
 
 struct TupleHeader {
     //current header (index)offset in this block
@@ -39,6 +40,8 @@ struct TupleHeader {
     uint64_t log_entry_;
     // tuple offset in the block
     uint64_t tuple_slot_;
+    oid_t table_id;
+//    uint64_t block_ptr;
     // gc will get latch, and update the commi_id = INVALID_CID
 //    SpinLatch latch;
 
@@ -56,7 +59,7 @@ struct TupleHeader {
     ~TupleHeader() = default;
 
     inline void free(uint32_t size_) {
-//        VSTORE_MEMSET(this, 0 , size_);
+        VSTORE_MEMSET(this, 0 , size_);
     }
     inline void init(TupleHeader *tp_hd, uint64_t tp_slot, oid_t offset) {
         tp_hd->SetHdId(offset);
@@ -134,6 +137,19 @@ struct TupleHeader {
     inline uint64_t GetTupleSlot() {
 
         return  tuple_slot_;
+    }
+
+//    inline void SetBlockPtr(uint64_t ptr){
+//        this->block_ptr = ptr;
+//    }
+//    inline uint64_t GetBlockPtr(){
+//        return this->block_ptr;
+//    }
+    inline void SetTableId(oid_t id){
+        this->table_id = id;
+    }
+    inline oid_t GetTableId(){
+        return this->table_id;
     }
 
 };
@@ -394,49 +410,6 @@ private:
 };
 
 /**
- * A block is a chunk of memory used for storage. It does not have any meaning
- * this only used by initializing a nodebase
- */
-class alignas(DRAM_BLOCK_SIZE) DramBlock {
-//class  DramBlock {
-public:
-
-    /**
-     * Contents of the dram block.
-     */
-    char content_[DRAM_BLOCK_SIZE];
-
-};
-
-/**
-* Custom allocator used for the object pool of buffer segments
-*/
-class DramBlockAllocator {
-public:
-    /**
-     * Allocates a new object by calling its constructor.
-     * @return a pointer to the allocated object.
-     */
-    DramBlock *New( ) { return new DramBlock() ; }
-
-    /**
-     * Reuse a reused chunk of memory to be handed out again
-     * @param reused memory location, possibly filled with junk bytes
-     */
-    void Reuse(DramBlock *const reused) {
-        /* no operation required */
-    }
-
-    /**
-     * Deletes the object by calling its destructor.
-     * @param ptr a pointer to the object to be deleted.
-     */
-    void Delete(DramBlock *const ptr) { delete ptr; }
-};
-
-using DramBlockPool = ObjectPool<DramBlock, DramBlockAllocator>;
-
-/**
  * Version block is defined size
  * Get empty tuple slot
  * Insert tuple
@@ -650,54 +623,36 @@ public:
     void DeallocateBlock(void *p);
     oid_t GetNextVersionBlockId() { return ++version_block_oid_; }
     oid_t GetCurrentVersionBlockId() { return version_block_oid_; }
-//    void RegisterThread(const size_t thread_id)   {
-//        lock_.Lock();
-//
-//        local_clean_set_->operator[](thread_id) = {};
-//
-//        lock_.Unlock();
-//    }
-//
-//    void DeregisterThread(const size_t thread_id)   {
-//        lock_.Lock();
-//
-//        local_clean_set_->erase(thread_id);
-//
-//        lock_.Unlock();
-//    }
 
-    /**
-     * A transaction enters local cleaner with end_commit_id
-     * @param thread_id, local thread id
-     * @param end_commit_id, txn end commit id
-     * @param gc_type, garbage version produced by txn type
-     * @param physical_location, old version physical location NVM
-     * @return
-     */
-    void EnterCleaner(const cid_t end_commit_id,
-                       const GCVersionType gc_type, void *physical_locatioin,
-                       uint32_t tuple_header_size, oid_t table_id, uint64_t block_ptr) ;
+    FreeBlockSlot GetFreeSlot(oid_t table_id);
 
-    /**
-     * A transaction exits local cleaner with end_commit_id
-     * @param thread_id
-     * @param end_commit_id
-     */
-    void ExitCleaner(const cid_t end_commit_id) ;
+    int CollectRetiredVersionSet( const cid_t min_active_id);
 
-    FreeBlockSlot GetFreeSlot(oid_t table_id){
-        if (local_available_.size() <=0 ){return nullptr;}
-        tbb::concurrent_queue<FreeBlockSlot> f_b_ss = local_available_[table_id];
-        if (f_b_ss.empty()){return nullptr;}
-        FreeBlockSlot f_b_s;
+    static void CleanCandidateSlot(std::shared_ptr<TxnVersionInfo> &elem,
+                                   const std::function<void(int clean_count)>& on_complete);
 
-        f_b_ss.try_pop(f_b_s);
-        return f_b_s;
+    tbb::concurrent_queue<FreeBlockSlot> &GetDeallocatedQueue(){
+        return local_candidate_available_;
     }
 
-    int CollectOldVersionSet( const cid_t min_active_id);
-
-    int CleanCandidateSlot(const int thread_id);
+    inline void EnterCleaner(cid_t  end_commit_id,
+                             GCVersionType type,
+                             void *new_tuple_header,
+                             uint32_t tuple_header_size,
+                             cid_t table_id = MAX_CID,
+                             uint64_t block_location =0) {
+      std::vector<TxnVersionInfo> txn_set;
+      if (new_tuple_header != nullptr){
+          table_id = reinterpret_cast<TupleHeader *>(new_tuple_header)->GetTableId();
+      }
+      auto ret = local_retired_set_->Find(end_commit_id, txn_set);
+      if (ret){
+          txn_set.push_back({table_id, new_tuple_header,tuple_header_size,type});
+      }else{
+          txn_set.push_back({table_id, new_tuple_header,tuple_header_size,type});
+          local_retired_set_->Upsert(end_commit_id,txn_set);
+      }
+    }
 
     void DeallocateNVMSpace();
 
@@ -729,11 +684,12 @@ private:
     SpinLatch lock_;
     //thread id, commit id, version gc
 //    std::unordered_map<int, std::unordered_map<cid_t, std::vector<TxnVersionInfo>>> local_clean_set_;
-    std::shared_ptr<GCSet> local_clean_set_;
+    std::shared_ptr<VCSet> local_retired_set_;
     // free slot: tuple header physical location
-    typedef std::queue<FreeBlockSlot> deallocated_queue;
-    std::unordered_map<oid_t, tbb::concurrent_queue<FreeBlockSlot>> local_available_;
-    std::unordered_map<int, std::unique_ptr<deallocated_queue>> local_candidate_available_;
+//    typedef std::queue<FreeBlockSlot> deallocated_queue;
+//    std::unordered_map<oid_t, tbb::concurrent_queue<FreeBlockSlot>> local_available_;
+    //<work thread id, candidata slot queue>
+    tbb::concurrent_queue<FreeBlockSlot> local_candidate_available_;
 
 };
 
@@ -776,9 +732,9 @@ public:
 
     bool IsLogStart(){return starting;}
 
-    void LogCatalog(Catalog *catalog){log_catalog = catalog;}
+    void LogCatalog(const Catalog *catalog){log_catalog = catalog;}
 
-    Catalog *GetLogCatalog(){return log_catalog;}
+    const Catalog *GetLogCatalog()  {return log_catalog;}
 //    std::multimap<cid_t, std::shared_ptr<LogRecord>> GetLogRecordBuffer() {
 //        return log_record_buffer;
 //    }
@@ -790,7 +746,7 @@ public:
 private:
     LogManager();
     SpinLatch latch_;
-    Catalog *log_catalog;
+    const Catalog *log_catalog;
     //indirect array, to produce (log serial number)lsn
     std::shared_ptr<IndirectionArray> lsn_indirect_array;
     bool starting = false;
@@ -807,7 +763,7 @@ class VersionStore{
 public:
     static VersionStore *GetInstance();
 
-    Status Init(std::vector<Catalog *> catalog_list);
+    Status Init(std::vector<Catalog *> &catalog_list);
 
     ~VersionStore();
 
@@ -820,11 +776,11 @@ public:
     // return a empty tuple location
     std::pair<oid_t, TupleHeader *> GetEmptyTupleSlot(Catalog *catalog, const BaseTuple *tuple);
     // increase the tuple count
-    void IncreaseTupleCount(const size_t &amount){
-        total_count.fetch_add(1);
+    void IncreaseTupleCount(oid_t table_id, const size_t &amount){
+        total_count[table_id].fetch_add(1);
     }
-    uint32_t GetTotalCount(){
-        return total_count;
+    uint32_t GetTotalCount(oid_t table_id){
+        return total_count[table_id];
     }
     uint32_t GetCurrentVersionBlockId();
     // log write record
@@ -835,12 +791,14 @@ public:
 
 private:
     VersionStore();
-    std::atomic<uint32_t> total_count = ATOMIC_VAR_INIT(0);
+//    std::atomic<uint64_t> total_count = ATOMIC_VAR_INIT(0);
+    std::unordered_map<oid_t, std::atomic<uint32_t>> total_count ;
     //log table id 0, user table id from 1 to n
-    std::unordered_map<oid_t, std::vector<VersionBlock *>>::iterator active_v_b_itr;
+    std::unordered_map<oid_t, std::vector<VersionBlock *>>::iterator retir_active_v_b_itr;
     //active retiring version chunks
-    std::unordered_map<oid_t, std::vector<VersionBlock *>> active_version_blocks_;
-//    tbb::concurrent_unordered_map<oid_t, std::vector<VersionBlock *>> active_version_blocks_;
+    std::vector<VersionBlock *> log_active_version_blocks_;
+//    std::vector<VersionBlock *> retir_active_version_blocks_;
+    std::unordered_map<oid_t, std::array<VersionBlock *,default_active_block_count_>> retir_active_version_blocks_;
 //    std::vector<std::vector<VersionBlock *>> active_log_blocks_;
     LogManager *log_manager{};
 
@@ -865,6 +823,13 @@ private:
     LogManager *log_mgr;
 };
 /**
+ * Synchronous persist the log records of the transaction
+ * when txn commit
+ */
+class SyncPersistentLogManager{
+
+};
+/**
  * version cleaner
  * 1. flush to SSD for recovery, release the location of the log chunks
  *    compute the current min active txn id,
@@ -880,23 +845,17 @@ private:
  */
 class VersionCleaner {
 public:
-    VersionCleaner(VersionStore *buf_mgr): buf_mgr(buf_mgr) {}
+    VersionCleaner();
 
-    void StartClean();
-    void StopClean();
-    static void ClearCleans(int thread_id);
-//    int StartCleanerThread();
-//
-//    int EndCleanerThread();
-protected:
-    void CleanVersionsProcessing(const int &thread_id);
+    ~VersionCleaner();
+
+    static VersionCleaner *GetInstance();
+
+    static void CleanVersionsProcessing(double period_duration);
 
 private:
-    VersionStore *buf_mgr;
-    volatile bool is_running_;
-    static int clean_thread_count_;
-//    std::atomic<bool> stopped{false};
-//    std::unique_ptr<std::thread> clean_thread;
+//    volatile bool is_running_;
+//    void CleanVersionsProcessing(double period_duration);
 };
 
 

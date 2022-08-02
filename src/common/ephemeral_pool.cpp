@@ -14,7 +14,7 @@ EphemeralPool::~EphemeralPool() {
     undo_buffer_pool->Empty();
 }
 
-uint64_t EphemeralPool::Allocate(char *hdr_, char *src_rcd, uint64_t next_tuple,
+std::pair<uint32_t, uint64_t> EphemeralPool::Allocate(char *hdr_, char *src_rcd, uint64_t next_tuple,
                                  uint16_t key_len,
                                  uint32_t payload_size,
                                  const cid_t cstamp, const cid_t pstamp) {
@@ -37,21 +37,27 @@ uint64_t EphemeralPool::Allocate(char *hdr_, char *src_rcd, uint64_t next_tuple,
     auto loc_ptr = reinterpret_cast<uint64_t>(new_loc);
     locations_.Upsert(loc_ptr,header);
 
-    return loc_ptr;
+    return std::make_pair(location.first,loc_ptr);
 }
 /**
  * free the location
  * @param ptr
  */
-void EphemeralPool::Free(uint64_t ptr) {
-    std::shared_ptr<EphemeralPool::OverwriteVersionHeader> header;
-    auto ret = locations_.Find(ptr,header);
-    //undo buffer pool block's entry count --
-    if(ret){
-        if(header->count <= 0){
-            undo_buffer_pool->Erase(header->GetBufferIndex());
-        }
-    }
+bool EphemeralPool::Free(uint32_t buffer_index, uint64_t ptr) {
+
+    auto ret = locations_.Erase(ptr);
+    assert(ret);
+    undo_buffer_pool->Erase(buffer_index);
+    return true;
+
+//    std::shared_ptr<EphemeralPool::OverwriteVersionHeader> header;
+//    auto ret = locations_.Find(ptr,header);
+//    //undo buffer pool block's entry count --
+//    if(ret){
+//        if(header->count <= 0){
+//            undo_buffer_pool->Erase(ptr);
+//        }
+//    }
 }
 /**
  * decrease the dependency on the location
@@ -60,17 +66,19 @@ void EphemeralPool::Free(uint64_t ptr) {
 void EphemeralPool::DecreaseWRCount(uint64_t ptr) {
 //    auto *cptr = (char *) ptr;
 //    auto header = locations_[ptr];
+
     std::shared_ptr<EphemeralPool::OverwriteVersionHeader> header;
     auto ret = locations_.Find(ptr,header);
     if (ret) {
         auto &latch = header->Getlatch();
         latch.Lock();
-        uint16_t count = header->SubCount();
+        UNUSED_ATTRIBUTE uint16_t count = header->SubCount();
         latch.Unlock();
-        if (count <= 0) {
-            Free(ptr);
-        }
+//        if (count <= 0) {
+//            Free(header->GetBufferIndex(), ptr);
+//        }
     }
+
 }
 /**
  * increase the dependency on the location
@@ -100,7 +108,9 @@ std::shared_ptr<EphemeralPool::OverwriteVersionHeader>
                     EphemeralPool::GetOversionHeader(uint64_t ptr) {
 //    auto *cptr = (char *) ptr;
 //    auto header = locations_.Find()find(ptr) ;
-    if (ptr == 0){return nullptr;}
+    if (ptr == 0){
+        return nullptr;
+    }
     std::shared_ptr<EphemeralPool::OverwriteVersionHeader> header ;
     auto ret = locations_.Find(ptr,header);
     if (ret) {
@@ -127,44 +137,44 @@ std::shared_ptr<EphemeralPool::OverwriteVersionHeader>
     }
     return nullptr;
 }
-/**
- * track the writer of the record meta
- * old->new
- * @param metaptr_val key, recoord meta
- * @param meta old_meta
- * @param overwriter new_meta(overwriter)
- */
-void EphemeralPool::AddWriters(uint64_t metaptr_val, cid_t meta, cid_t overwriter){
-    std::vector<std::pair<cid_t, cid_t>> writers;
-    auto ret = writers_.Find(metaptr_val, writers);
-    if (ret){
-        writers.emplace_back(std::make_pair(meta, overwriter));
-    }else{
-        writers.emplace_back(std::make_pair(meta, overwriter));
-        writers_.Upsert(metaptr_val, writers);
-    }
-}
-/**
- * get old by cstamp of the current new meta
- * @param metaptr_val
- * @param meta
- * @return
- */
-cid_t EphemeralPool::GetOveriter(uint64_t metaptr_val, cid_t meta){
-    cid_t overwr = INVALID_CID;
-    std::vector<std::pair<cid_t, cid_t>> writers;
-    auto ret = writers_.Find(metaptr_val, writers);
-    if (ret){
-        for (int i = 0; i < writers.size(); ++i) {
-            if (writers[i].first == meta){
-                overwr = writers[i].second;
-                break;
-            }
-        }
-    }
-
-    return overwr;
-}
+///**
+// * track the writer of the record meta
+// * old->new
+// * @param metaptr_val key, recoord meta
+// * @param meta old_meta
+// * @param overwriter new_meta(overwriter)
+// */
+//void EphemeralPool::AddWriters(uint64_t metaptr_val, cid_t meta, cid_t overwriter){
+//    std::vector<std::pair<cid_t, cid_t>> writers;
+//    auto ret = writers_.Find(metaptr_val, writers);
+//    if (ret){
+//        writers.emplace_back(std::make_pair(meta, overwriter));
+//    }else{
+//        writers.emplace_back(std::make_pair(meta, overwriter));
+//        writers_.Upsert(metaptr_val, writers);
+//    }
+//}
+///**
+// * get old by cstamp of the current new meta
+// * @param metaptr_val
+// * @param meta
+// * @return
+// */
+//cid_t EphemeralPool::GetOveriter(uint64_t metaptr_val, cid_t meta){
+//    cid_t overwr = INVALID_CID;
+//    std::vector<std::pair<cid_t, cid_t>> writers;
+//    auto ret = writers_.Find(metaptr_val, writers);
+//    if (ret){
+//        for (int i = 0; i < writers.size(); ++i) {
+//            if (writers[i].first == meta){
+//                overwr = writers[i].second;
+//                break;
+//            }
+//        }
+//    }
+//
+//    return overwr;
+//}
 cid_t EphemeralPool::GetPs(uint64_t ptr) {
     cid_t ps = INVALID_CID;
 

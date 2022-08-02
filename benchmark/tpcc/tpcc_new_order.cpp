@@ -126,7 +126,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
 
         auto res = executor.Execute();
         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when select item table");
+            LOG_DEBUG("abort transaction when select item table");
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
@@ -134,7 +134,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
         auto &items = executor.GetResults();
 
         if (items.size() != 1) {
-            LOG_ERROR("getItemInfo return size incorrect : %lu", items.size());
+            LOG_DEBUG("getItemInfo return size incorrect : %lu", items.size());
             assert(false);
             return false;
         }
@@ -164,14 +164,14 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
                                                        version_store);
         auto res = executor.Execute();
         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when select warehouse table");
+            LOG_DEBUG("abort transaction when select warehouse table");
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
 
         auto warehouses = executor.GetResults();
         if (executor.GetResults().size() != 1) {
-            LOG_TRACE("abort transaction when select warehouse table");
+            LOG_DEBUG("abort transaction when select warehouse table");
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
@@ -192,8 +192,8 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
     int32_t d_next_o_id = 0;
     {
         auto key = District::DistrictKey{
-                warehouse_id,
-                district_id
+                (int64_t) warehouse_id,
+                (int64_t) district_id
         };
         bool point_lookup = true;
         bool is_for_update = false;
@@ -202,6 +202,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
         auto predicate = nullptr;
 
         const char *k_district = reinterpret_cast<const char *>(&key);
+
         IndexScanExecutor<const char *, District> executor(district_table,
                                                                     key_size,
                                                                     k_district,
@@ -213,14 +214,17 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
                                                                     version_store);
         auto res = executor.Execute();
         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when select district table");
+            LOG_DEBUG("abort transaction when select district table");
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
 
         auto districts = executor.GetResults();
         if(districts.size() != 1){
-            LOG_TRACE("abort transaction when select district table");
+            int64_t  i_w = *reinterpret_cast<const uint64_t *>(k_district);
+            int64_t i_d = *reinterpret_cast<const uint64_t *>(k_district + 8);
+            LOG_DEBUG("abort transaction when select district table,%d,%d, %lu, %lu.",
+                      warehouse_id, district_id,i_w,i_d);
             return false;
         }
         d_tax = std::atof(districts[0]->D_TAX);
@@ -263,14 +267,14 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
                                                                     version_store);
         auto res = executor.Execute();
         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when select customer table");
+            LOG_DEBUG("abort transaction when select customer table");
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
 
         auto customers = executor.GetResults();
         if (customers.size() != 1){
-            LOG_TRACE("abort transaction when select customer table");
+            LOG_DEBUG("abort transaction when select customer table");
             return false;
         }
         c_discount = std::atof(customers[0]->C_DISCOUNT);
@@ -294,10 +298,10 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
         auto key = District::DistrictKey{warehouse_id, district_id};
         uint32_t key_size = sizeof(uint64_t) + sizeof(uint64_t);
 
-        auto updater = [&](District &d) {
-            d.D_NEXT_O_ID = district_update_value;
-        };
-        auto col_num = District::GetColumnNum();
+//        auto updater = [&](District &d) {
+//            d.D_NEXT_O_ID = district_update_value;
+//        };
+//        auto col_num = District::GetColumnNum();
         std::vector<oid_t> up_col;
         up_col.emplace_back(2);
         uint32_t delta = district_update_value;
@@ -319,7 +323,8 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
             return true;
         }
         if (!res || txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when update district table");
+            LOG_DEBUG("abort transaction when update district table, D_NEXT_O_ID = %d WHERE D_ID "
+                      "= %d AND D_W_ID = %d",district_update_value,district_id, warehouse_id);
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
@@ -352,7 +357,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
 
         auto res = executor.Execute();
         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when inserting order table, thread_id = %d, d_id = "
+            LOG_INFO("abort transaction when inserting order table, thread_id = %d, d_id = "
                         "%d, next_o_id = %d",
                         (int) thread_id, (int) district_id, (int) d_next_o_id);
             txn_manager->AbortTransaction(txn_ctx);
@@ -386,7 +391,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
         auto res = executor.Execute();
         if (executor.GetResultCode().IsCASFailure() || executor.GetResultCode().IsRetryFailure()){
             if (retry2_count > 5){
-                LOG_TRACE("abort transaction when inserting new order table");
+                LOG_DEBUG("abort transaction when inserting new order table");
                 txn_manager->AbortTransaction(txn_ctx);
                 return false;
             }else{
@@ -395,7 +400,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
             }
         }
         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when inserting new order table");
+            LOG_INFO("abort transaction when inserting new order table");
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
@@ -435,14 +440,14 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
         auto res = executor.Execute();
 
         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when select stock table");
+            LOG_DEBUG("abort transaction when select stock table");
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
 
         auto stocks = executor.GetResults();
         if (stocks.size() != 1){
-            LOG_TRACE("abort transaction when select stock table");
+            LOG_DEBUG("abort transaction when select stock table");
             continue;
         }
 
@@ -497,7 +502,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
                                                                           version_store);
         res = stock_update_executor.Execute();
         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-            LOG_TRACE("abort transaction when update stock table");
+            LOG_DEBUG("abort transaction when update stock table");
             txn_manager->AbortTransaction(txn_ctx);
             return false;
         }
@@ -537,7 +542,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
             if (order_line_insert_executor.GetResultCode().IsCASFailure() ||
                             order_line_insert_executor.GetResultCode().IsRetryFailure()){
                 if (retry3_count > 5){
-                    LOG_TRACE("abort transaction when inserting order line table");
+                    LOG_DEBUG("abort transaction when inserting order line table");
                     txn_manager->AbortTransaction(txn_ctx);
                     return false;
                 }else{
@@ -546,7 +551,7 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
                 }
             }
             if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-                LOG_TRACE("abort transaction when inserting order line table");
+                LOG_INFO("abort transaction when inserting order line table");
                 txn_manager->AbortTransaction(txn_ctx);
                 return false;
             }
@@ -564,8 +569,8 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
 
     if (ret == ResultType::SUCCESS) {
         // transaction passed commitment.
-        LOG_TRACE("commit txn, thread_id = %d, d_id = %d, next_o_id = %d",
-                  (int) thread_id, (int) district_id, (int) d_next_o_id);
+//        LOG_DEBUG("commit txn, thread_id = %d, d_id = %d, next_o_id = %d, WHERE D_ID = %d",
+//                  (int) thread_id, (int) district_id, (int) d_next_o_id, (int) warehouse_id);
         if (log_manager->IsLogStart()){
             auto rw_set = txn_ctx->GetReadWriteSet();
             auto end_commit_id = txn_ctx->GetCommitId();
@@ -590,8 +595,8 @@ bool RunNewOrder(const size_t &thread_id, VersionStore *version_store, Ephemeral
     } else {
         // transaction failed commitment.
         assert(ret == ResultType::ABORTED || ret == ResultType::FAILURE);
-        LOG_TRACE("abort txn, thread_id = %d, d_id = %d, next_o_id = %d",
-                  (int) thread_id, (int) district_id, (int) d_next_o_id);
+        LOG_DEBUG("abort txn, thread_id = %d, d_id = %d, next_o_id = %d, WHERE D_ID = %d",
+                  (int) thread_id, (int) district_id, (int) d_next_o_id, (int) warehouse_id);
 //        delete txn_ctx;
 //        txn_ctx = nullptr;
 
@@ -833,7 +838,7 @@ bool RunQuery2(const size_t &thread_id, VersionStore *version_store, EphemeralPo
                         auto res = executor.Execute();
 
                         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-                            LOG_TRACE("abort transaction when select stock table");
+                            LOG_DEBUG("abort transaction when select stock table");
                             txn_manager->AbortTransaction(txn_ctx);
                             return false;
                         }
@@ -881,7 +886,7 @@ bool RunQuery2(const size_t &thread_id, VersionStore *version_store, EphemeralPo
 
                     auto res_item = executor_item.Execute();
                     if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-                        LOG_TRACE("abort transaction when select item table");
+                        LOG_DEBUG("abort transaction when select item table");
                         txn_manager->AbortTransaction(txn_ctx);
                         return false;
                     }
@@ -937,7 +942,7 @@ bool RunQuery2(const size_t &thread_id, VersionStore *version_store, EphemeralPo
                                                                                        version_store);
                         res = stock_update_executor.Execute();
                         if (txn_ctx->GetResult() != ResultType::SUCCESS) {
-                            LOG_TRACE("abort transaction when update stock table");
+                            LOG_DEBUG("abort transaction when update stock table");
                             txn_manager->AbortTransaction(txn_ctx);
                             return false;
                         }
@@ -965,12 +970,13 @@ bool RunQuery2(const size_t &thread_id, VersionStore *version_store, EphemeralPo
     if (result == ResultType::SUCCESS) {
 //        delete txn_ctx;
 //        txn_ctx = nullptr;
+        LOG_DEBUG("transaction success.");
 
         return true;
     } else {
 //        delete txn_ctx;
 //        txn_ctx = nullptr;
-
+        LOG_DEBUG("transaction abort.");
         return false;
     }
 
