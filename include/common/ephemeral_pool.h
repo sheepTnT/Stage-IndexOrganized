@@ -25,18 +25,19 @@ class EphemeralPool {
 public:
     struct OverwriteVersionHeader{
         OverwriteVersionHeader();
-        OverwriteVersionHeader(cid_t cstamp_, cid_t pstamp_, cid_t sstamp_ ) : cstamp(cstamp_),
-                             pstamp(pstamp_),sstamp(sstamp_),count(0),next_ptr(0),
+        OverwriteVersionHeader(cid_t cstamp_, cid_t rstamp_, cid_t sstamp_ ) : cstamp(cstamp_),
+                             pstamp(cstamp_),rstamp(rstamp_),sstamp(sstamp_),count(0),next_ptr(0),
                              pre_ptr(0),node_header_ptr(nullptr),buffer_index_(0),key_len(0),
                              payload_size(0),waiting_free(false){
             readers.resize(0);
         }
-        //the create timestamp of the version
-        //writer
+        //version creation timestamp
         cid_t cstamp;
-        //the latest read/write timestamp of the version
+        //version access timestamp
         cid_t pstamp;
-        //the end timestamp of the version
+        //the lower bound of version visibility
+        cid_t rstamp;
+        //version successor timestamp
         cid_t sstamp;
         //old version tuple header
         uint64_t next_ptr;
@@ -80,6 +81,9 @@ public:
         }
         inline cid_t GetCstamp(){
             return cstamp;
+        }
+        inline cid_t GetRstamp(){
+            return rstamp;
         }
         inline char *GetNodeHeader(){
             return reinterpret_cast<char *>(node_header_ptr);

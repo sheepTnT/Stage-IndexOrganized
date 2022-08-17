@@ -127,7 +127,7 @@ cid_t SSNTransactionManager::FindMinSstamp(TransactionContext *const current_txn
                 std::shared_ptr<EphemeralPool::OverwriteVersionHeader> hdr_curr =
                         overwritten_buffer_pool->GetOversionHeader(meta_ptr->GetNextPointer());
                 if (hdr_curr != nullptr){
-                    assert(meta_cstamp == hdr_curr->GetPstamp());
+                    assert(meta_cstamp == hdr_curr->GetRstamp());
                     //when update the version, cstamp is the writer txn
                     cid_t u_txn_id = hdr_curr->GetCstamp();
                     TransactionContext *txn_conxt;
@@ -553,8 +553,10 @@ ResultType SSNTransactionManager::CommitTransaction(
             // update the retiring version tuple txn info
             if (next_tuple_header != 0){
                 new_tuple_header = reinterpret_cast<TupleHeader *>(next_tuple_header);
-                new_tuple_header->SetBeginId(meta_data.GetTxnCommitId());
-                new_tuple_header->SetCommitId(t_sstamp);
+//                new_tuple_header->SetBeginId(meta_data.GetTxnCommitId());
+//                new_tuple_header->SetCommitId(t_sstamp);
+                new_tuple_header->SetBeginId(hdr->GetRstamp());
+                new_tuple_header->SetCommitId(t_cstamp);
                 auto tuple_slot_ptr = new_tuple_header->GetTupleSlot();
                 if(tuple_slot_ptr == 0 || tuple_slot_ptr == std::numeric_limits<uint64_t>::max()){
                     LOG_INFO("Failed to get tuple slot location within current version block.");

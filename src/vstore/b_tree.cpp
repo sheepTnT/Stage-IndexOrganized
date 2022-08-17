@@ -1151,8 +1151,8 @@ ReturnCode LeafNode::Delete(const char *key, uint16_t key_size, uint32_t value_s
                                                record_key,
                                                meta_ptr->next_ptr,
                                                metadata.GetKeyLength() , value_size,
-                                               commit_id,
-                                               meta_ptr->GetTxnCommitId());
+                                                commit_id,
+                                                meta_ptr->GetTxnCommitId());
     rd_copy_location = rd_copy.second;
     char *target_loc = reinterpret_cast<char *>(rd_copy_location);
     std::memcpy(target_loc, record_key, metadata.GetKeyLength());
@@ -1946,10 +1946,10 @@ std::unique_ptr<Record> BTree::Read(const char *key, uint16_t key_size,
                     auto next_tuple = overwritten_buffer_->GetNext(copy_location);
 //                    LOG_DEBUG("NextTuplePtr, %zu", next_tuple);
                     meta_rd.SetNextTuplePtr(next_tuple);
-                    meta_rd.SetCstamp(ret_hd->GetCstamp());
+                    meta_rd.SetCstamp(ret_hd->GetRstamp());
                     record = Record::Neww(meta_rd, reinterpret_cast<char *>(copy_location),
                                           parameters.payload_size);
-                    record->SetCstamp(ret_hd->GetCstamp());
+                    record->SetCstamp(ret_hd->GetRstamp());
                     //track the readers on the version
                     ret_hd->AddReader(commit_id);
 

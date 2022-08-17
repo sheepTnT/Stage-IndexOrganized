@@ -14,10 +14,12 @@ EphemeralPool::~EphemeralPool() {
     undo_buffer_pool->Empty();
 }
 
-std::pair<uint32_t, uint64_t> EphemeralPool::Allocate(char *hdr_, char *src_rcd, uint64_t next_tuple,
+std::pair<uint32_t, uint64_t> EphemeralPool::Allocate(char *hdr_,
+                                 char *src_rcd, uint64_t next_tuple,
                                  uint16_t key_len,
                                  uint32_t payload_size,
-                                 const cid_t cstamp, const cid_t pstamp) {
+                                 const cid_t cstamp,
+                                 const cid_t rstamp) {
     auto size = payload_size + key_len;
     std::pair<uint32_t, char *> location = undo_buffer_pool->NewEntry(size);
 
@@ -25,7 +27,7 @@ std::pair<uint32_t, uint64_t> EphemeralPool::Allocate(char *hdr_, char *src_rcd,
     char *new_loc = location.second;
 
     std::shared_ptr<EphemeralPool::OverwriteVersionHeader> header
-            (new EphemeralPool::OverwriteVersionHeader(cstamp, pstamp, MAX_CID));
+            (new EphemeralPool::OverwriteVersionHeader(cstamp, rstamp, MAX_CID));
     header->SetNodeHeader(hdr_);
 //    std::cout<< "GetNextTupleHeader %zu:" << next_tuple << std::endl;
     header->SetNext(next_tuple);
