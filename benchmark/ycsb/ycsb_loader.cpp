@@ -24,7 +24,8 @@ namespace ycsb {
 YCSBTable *user_table = nullptr;
 std::vector<std::string> eml_keys = {};
 
-void CreateYCSBDatabase(ParameterSet param, VersionStore *buf_mgr ,
+void CreateYCSBDatabase(ParameterSet param, VersionStore *buf_mgr,
+                        LogManager *log_mng ,
                         DramBlockPool *leaf_node_pool ,
                         InnerNodeBuffer *inner_node_pool ,
                         EphemeralPool *conflict_buffer ) {
@@ -55,11 +56,15 @@ void CreateYCSBDatabase(ParameterSet param, VersionStore *buf_mgr ,
                                     leaf_node_pool, inner_node_pool, conflict_buffer);
 
     //Log manager
-    Catalog *log_catalog = new Catalog();
-    log_catalog->table_id = 0;
-    log_catalog->is_log = true;
+    if (log_mng->IsLogStart()){
+        Catalog *log_catalog = new Catalog();
+        log_catalog->table_id = 0;
+        log_catalog->is_log = true;
+        schemas.push_back(log_catalog);
+        ycsb_catalogs.push_back(log_catalog);
+    }
+
     ycsb_catalogs.push_back(table_catalog);
-    schemas.push_back(log_catalog);
     schemas.push_back(table_catalog);
     buf_mgr->Init(schemas);
 
@@ -95,9 +100,10 @@ void LoadYCSBRows(VersionStore *version_store, const int begin_rowid, const int 
     //insert failed tuples
     std::list<int> retry_rowids;
     // Insert tuples into the data table.
-    auto txn_manager = SSNTransactionManager::GetInstance();
-    auto txn_ctx = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
-    txn_ctx->SetReadOnly();
+//    auto txn_manager = SSNTransactionManager::GetInstance();
+//    auto txn_ctx = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
+    LOG_DEBUG("start loading rows.");
+
     FastRandom rnd_var(rand());
 
     if(state.string_mode){
@@ -116,19 +122,22 @@ void LoadYCSBRows(VersionStore *version_store, const int begin_rowid, const int 
                 uint32_t k_len = 16;
 
                 RecordMeta meta;
-                auto txn_id = txn_ctx->GetReadId();
+                cid_t txn_id = INVALID_CID;
                 ReturnCode insert_res = user_table->Insert(k_, k_len,
                                                            tuple.GetData(),
                                                            &meta,
                                                            txn_id);
 
-
-                if(insert_res.IsKeyExists()){
-                    goto retry;
-                }
-                if (insert_res.IsRetryFailure() || insert_res.IsCASFailure() ){
+                if (insert_res.IsKeyExists() || insert_res.IsRetryFailure()
+                        || insert_res.IsCASFailure() || insert_res.IsNotFound()){
                     retry_rowids.push_back(rowid);
+                }else{
+                    RecordMetadata *meta_ptr = reinterpret_cast<RecordMetadata *>(meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+                    user_table->FinalizeInsert(meta_ptr, txn_id);
+
+                    user_table->IncreaseTupleCount(1);
                 }
+
             }
         }
     }else{
@@ -142,24 +151,31 @@ void LoadYCSBRows(VersionStore *version_store, const int begin_rowid, const int 
 
                 uint32_t k_ = rowid;
                 RecordMeta meta;
-                auto txn_id = txn_ctx->GetReadId();
+                auto txn_id = INVALID_CID;
                 ReturnCode insert_res = user_table->Insert((reinterpret_cast<const char *>(&k_)),
                                                            sizeof(uint32_t),
                                                            tuple.GetData(),
                                                            &meta,
                                                            txn_id);
-                if (insert_res.IsRetryFailure() || insert_res.IsCASFailure()){
+                if (insert_res.IsKeyExists() || insert_res.IsRetryFailure()
+                                || insert_res.IsCASFailure() || insert_res.IsNotFound()){
                     retry_rowids.push_back(k_);
+                }else{
+                    RecordMetadata *meta_ptr =
+                            reinterpret_cast<RecordMetadata *>(meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+                    user_table->FinalizeInsert(meta_ptr, txn_id);
+
+                    user_table->IncreaseTupleCount(1);
                 }
+
             }
         }
     }
 
-    auto result = txn_manager->CommitTransaction(txn_ctx);
-
+//    auto result = txn_manager->CommitTransaction(txn_ctx);
     //insert retry
-    txn_ctx = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
-    txn_ctx->SetReadOnly();
+//    txn_ctx = txn_manager->BeginTransaction(thread_id,IsolationLevelType::SERIALIZABLE);
+
     if(state.string_mode){
         while (!retry_rowids.empty()) {
             int retry_rowid = retry_rowids.front();
@@ -174,16 +190,22 @@ void LoadYCSBRows(VersionStore *version_store, const int begin_rowid, const int 
             const char *k_ = eml_str.data();
             uint32_t k_len = 16;
             RecordMeta meta;
-            auto txn_id = txn_ctx->GetReadId();
+            auto txn_id = INVALID_CID;
             ReturnCode insert_res = user_table->Insert(k_, k_len,
                                                        tuple.GetData(),
                                                        &meta,
                                                        txn_id);
             if(insert_res.IsKeyExists()){
-                goto retry_2;
+                continue;
             }
             if (!insert_res.IsCASFailure() && !insert_res.IsRetryFailure()){
                 retry_rowids.pop_front();
+
+                RecordMetadata *meta_ptr =
+                        reinterpret_cast<RecordMetadata *>(meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+                user_table->FinalizeInsert(meta_ptr, txn_id);
+
+                user_table->IncreaseTupleCount(1);
             }
         }
     }else{
@@ -196,23 +218,32 @@ void LoadYCSBRows(VersionStore *version_store, const int begin_rowid, const int 
                 memset(tuple.cols[i], retry_rowid, sizeof(tuple.cols[i]));
 
             RecordMeta meta;
-            auto txn_id = txn_ctx->GetReadId();
+            auto txn_id = INVALID_CID;
             ReturnCode insert_res = user_table->Insert((reinterpret_cast<const char *>(&k_)),
                                                        sizeof(uint32_t),
                                                        tuple.GetData(),
                                                        &meta,
                                                        txn_id);
+            if (insert_res.IsNotFound()){
+                continue;
+            }
             if (!insert_res.IsCASFailure() && !insert_res.IsRetryFailure()){
                 retry_rowids.pop_front();
+
+                RecordMetadata *meta_ptr =
+                        reinterpret_cast<RecordMetadata *>(meta.GetMetaData().GetLocationPtr()->record_meta_ptr);
+                user_table->FinalizeInsert(meta_ptr, txn_id);
+
+                user_table->IncreaseTupleCount(1);
             }
 
         }
     }
 
-    result = txn_manager->CommitTransaction(txn_ctx);
-
-    delete txn_ctx;
-    txn_ctx = nullptr;
+    LOG_DEBUG("end loading rows.");
+//    result = txn_manager->CommitTransaction(txn_ctx);
+//    delete txn_ctx;
+//    txn_ctx = nullptr;
 }
 
 void LoadYCSBDatabase(VersionStore *version_store) {
@@ -253,7 +284,10 @@ void LoadYCSBDatabase(VersionStore *version_store) {
     LOG_INFO("database table loading time = %lf ms", diff);
 
     //LOG_INFO("%sTABLE SIZES%s", peloton::GETINFO_HALF_THICK_LINE.c_str(), peloton::GETINFO_HALF_THICK_LINE.c_str());
-    LOG_INFO("user count = %d", tuple_count);
+    LOG_INFO("user table count = %d", tuple_count);
+
+    LOG_INFO("user table real count = %zu", user_table->GetTupleCount());
+
 
 }
 

@@ -27,8 +27,11 @@ public:
 //        if (!ptr) {
 //            throw std::bad_alloc();
 //        }
-
         buffer_data_ = new char[BUFFER_SEGMENT_SIZE];
+    }
+
+    ~ValenBuffer(){
+        delete buffer_data_;
     }
 
     /**
@@ -36,8 +39,12 @@ public:
      * @return Whether this segment have enough space left for size many bytes
      */
     bool HasBytesLeft(const uint32_t size) {
+//        latch.Lock();
+
         auto cur_size = size_ + size;
         bool has_ = cur_size <= BUFFER_SEGMENT_SIZE;
+
+//        latch.Unlock();
         return  has_;
     }
 
@@ -49,12 +56,12 @@ public:
      * @return pointer to the head of the allocated record
      */
     char *Reserve(const uint32_t size) {
-        latch.lock();
-        PELOTON_ASSERT(HasBytesLeft(size), "reserve bytes record.");
+        latch.Lock();
+        assert(HasBytesLeft(size));
         auto *result = buffer_data_ + size_;
         size_ += size;
         count_ = count_ + 1 ;
-        latch.unlock();
+        latch.Unlock();
 
         return result;
     }
@@ -65,10 +72,8 @@ public:
      * @return self pointer for chaining
      */
     ValenBuffer *Reset() {
-        latch.lock();
         size_ = 0;
         count_ = 0;
-        latch.unlock();
         return this;
     }
 
@@ -76,9 +81,9 @@ public:
      * decrease the count of the used segment in the valen buffer
      */
     void Erase(){
-        latch.lock();
+        latch.Lock();
         count_ = count_ -1;
-        latch.unlock();
+        latch.Unlock();
     }
 
     /**
@@ -94,7 +99,7 @@ private:
     friend class IterableBuffer;
 
     char *buffer_data_;
-    std::mutex latch;
+    SpinLatch latch;
     uint32_t size_ = 0;
     uint32_t count_ = 0;
 };
@@ -152,7 +157,7 @@ public:
      * Destructs this buffer, releases all its segments back to the buffer pool it draws from.
      */
     ~UndoBuffer() {
-        for (auto *segment : buffers_) buffer_pool_->Release(segment);
+        for (auto *segment : buffers_) buffer_pool_->Release(segment, 2);
     }
 
     /**
@@ -172,7 +177,7 @@ public:
         val_buffer_->Erase();
         if (val_buffer_->CurrentCount() == 0){
             ValenBuffer *free_ = val_buffer_->Reset();
-            buffer_pool_->Release(free_);
+            buffer_pool_->Release(free_, 2);
 //            LOG_DEBUG("release the undo valen buffer");
         }
 
@@ -193,10 +198,15 @@ public:
             bool rel = false;
             while(!rel){
                 new_segment = buffer_pool_->Get();
-                if(new_segment != nullptr) {rel = true;}
+                if(new_segment != nullptr)
+                {
+                    rel = true;
+                }else{
+                    std::cout<< "there is no enough segment in buffer pool!" <<std::endl;
+                }
             }
             PELOTON_ASSERT(reinterpret_cast<uintptr_t>(new_segment) % 8 == 0,
-                           "a delta entry should be aligned to 8 bytes");
+                          "a delta entry should be aligned to 8 bytes");
             buffers_.push_back(new_segment);
         }
         last_record_ = buffers_.back()->Reserve(size);
@@ -234,7 +244,7 @@ public:
      * Destructs this buffer, releases all its segments back to the buffer pool it draws from.
      */
     ~InnerNodeBuffer() {
-        for (auto *segment : buffers_) buffer_pool_->Release(segment);
+        for (auto *segment : buffers_) buffer_pool_->Release(segment, 1);
     }
 
     /**
@@ -247,7 +257,7 @@ public:
         val_buffer_->Erase();
         if (val_buffer_->CurrentCount() == 0){
             ValenBuffer *free_ = val_buffer_->Reset();
-            buffer_pool_->Release(free_);
+            buffer_pool_->Release(free_, 1);
 //            LOG_DEBUG("release the inner node valen buffer");
         }
 //        LOG_DEBUG("erase the record segment of the inner node valen buffer");
@@ -265,17 +275,21 @@ public:
             bool rel = false;
             while(!rel){
                 new_segment = buffer_pool_->Get();
-                if(new_segment != nullptr) {rel = true;}
+                if(new_segment != nullptr)
+                {
+                    rel = true;
+                }else{
+                    std::cout<< "there is no enough segment in buffer pool!" <<std::endl;
+                }
             }
             PELOTON_ASSERT(reinterpret_cast<uintptr_t>(new_segment) % 8 == 0,
-                           "a delta entry should be aligned to 8 bytes");
+                          "a delta entry should be aligned to 8 bytes");
             buffers_.push_back(new_segment);
         }
         last_record_ = buffers_.back()->Reserve(size);
         latch.Unlock();
 
         return std::make_pair((buffers_.size()-1),last_record_);
-//        return last_record_;
     }
 
     /**

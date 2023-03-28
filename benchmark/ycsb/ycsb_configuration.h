@@ -48,6 +48,9 @@ struct YCSBTupleInt {
         return data;
     }
 
+    void clear(){
+        cols;
+    }
 };
 
 

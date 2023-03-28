@@ -22,9 +22,9 @@ std::pair<uint32_t, uint64_t> EphemeralPool::Allocate(char *hdr_,
                                  const cid_t rstamp) {
     auto size = payload_size + key_len;
     std::pair<uint32_t, char *> location = undo_buffer_pool->NewEntry(size);
-
     //copy the record to the new location
     char *new_loc = location.second;
+//    char *new_loc = new char[size];
 
     std::shared_ptr<EphemeralPool::OverwriteVersionHeader> header
             (new EphemeralPool::OverwriteVersionHeader(cstamp, rstamp, MAX_CID));
@@ -39,6 +39,7 @@ std::pair<uint32_t, uint64_t> EphemeralPool::Allocate(char *hdr_,
     auto loc_ptr = reinterpret_cast<uint64_t>(new_loc);
     locations_.Upsert(loc_ptr,header);
 
+//    return std::make_pair(0,loc_ptr);
     return std::make_pair(location.first,loc_ptr);
 }
 /**

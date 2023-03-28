@@ -23,6 +23,7 @@ extern YCSBTable *user_table;
 extern std::vector<std::string> eml_keys;
 
 void CreateYCSBDatabase(ParameterSet param, VersionStore *buf_mgr = nullptr,
+                        LogManager *log_mng = nullptr,
                         DramBlockPool *leaf_node_pool= nullptr,
                         InnerNodeBuffer *inner_node_pool= nullptr,
                         EphemeralPool *conflict_buffer= nullptr);

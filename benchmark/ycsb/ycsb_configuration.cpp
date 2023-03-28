@@ -111,19 +111,19 @@ void ValidateZipfTheta(const configuration &state) {
 
 void ParseArguments(int argc, char *argv[], configuration &state) {
   // Default Values
-  state.scale_factor = 1000;
-  state.duration = 10;
+  state.scale_factor = 10*1000*1000;
+  state.duration = 20;
   state.warmup_duration = 0;
-  state.profile_duration = 1;
-  state.backend_count = 4;
-  state.loader_count = 3;
+  state.profile_duration = 4;
+  state.backend_count = 7;
+  state.loader_count = 1;
   state.operation_count = 10;
-  state.update_ratio = 0;
+  state.update_ratio = 0.9;
   state.zipf_theta = 0.0;
   state.exp_backoff = false;
   state.string_mode = false;
   state.scan_mode = false;
-  state.random_mode = false;
+  state.random_mode = true;
   state.vc_start = false;
 
 

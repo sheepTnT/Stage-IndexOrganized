@@ -80,13 +80,25 @@ public:
 
     inline void SetCommitId(const cid_t commit_id) { commit_id_ = commit_id; }
 
-    inline void SetSuccessor(const cid_t sstamp) { successor = sstamp; }
+    inline void SetSuccessor(const cid_t sstamp) {
+        auto sstamp_ = std::min(successor.load(std::memory_order_relaxed), sstamp);
+        successor.store(sstamp_,std::memory_order_relaxed);
+    }
 
-    inline cid_t GetSuccessor() const { return successor; }
+    inline cid_t GetSuccessor() const {
+        return successor.load(std::memory_order_relaxed);
+    }
 
-    inline void SetPredecessor(const cid_t pstamp) { predecessor = pstamp; }
+    inline void SetPredecessor(const cid_t pstamp)
+    {
+        auto pstamp_ = std::max(predecessor.load(std::memory_order_relaxed), pstamp);
+        predecessor.store(pstamp_, std::memory_order_relaxed);
+    }
 
-    inline cid_t GetPredecessor() const { return predecessor; }
+    inline cid_t GetPredecessor() const
+    {
+        return predecessor.load(std::memory_order_relaxed);
+    }
 
     inline void SetTxnId(const txn_id_t txn_id) { txn_id_ = txn_id; }
 
@@ -98,13 +110,58 @@ public:
 
     void RecordInsert(const RecordMeta &);
 
-    void SetFinished(){is_finish_ = true;}
+    void SetFinish()
+    {
+        txn_cnt_lock.Lock();
+        is_finished_ = true;
+        txn_cnt_lock.Unlock();
+    }
 
-    bool IsFinished(){return is_finish_;}
+    bool IsFinished()
+    {
+        bool ret = false;
+        txn_cnt_lock.Lock();
+        ret = is_finished_;
+        txn_cnt_lock.Unlock();
+        return ret;
+    }
 
-    void SetAbort(){is_abort_ = true;}
+    void SetAbort(){
+        txn_cnt_lock.Lock();
+        is_aborted_ = true;
+        txn_cnt_lock.Unlock();
+    }
 
-    bool IsAbort(){return is_abort_;}
+    bool IsAborted(){
+        bool ret = false;
+        txn_cnt_lock.Lock();
+        ret = is_aborted_;
+        txn_cnt_lock.Unlock();
+        return ret;
+    }
+
+    void SetCommitting(){
+        txn_cnt_lock.Lock();
+        is_committing_ = true;
+        txn_cnt_lock.Unlock();
+    }
+
+    bool IsCommitting(){
+        bool ret = false;
+        txn_cnt_lock.Lock();
+        ret = is_committing_;
+        txn_cnt_lock.Unlock();
+        return ret;
+    }
+
+    inline bool CheckExclusion(){
+        auto ps = predecessor.load(std::memory_order_relaxed);
+        auto ss = successor.load(std::memory_order_relaxed);
+        if(ss <= ps){
+            return false;
+        }
+        return true;
+    }
 
     bool RecordDelete(const RecordMeta &);
 
@@ -144,6 +201,14 @@ public:
         is_written_ = false;
     }
 
+    inline bool IsLoading() const {
+        return is_loading_ ;
+    }
+
+    inline void SetIsLoading() {
+        is_loading_ = true;
+    }
+
     inline void SetLastLogLsn(oid_t table_id, LSN_T lsn, RWType wr_type) {
 //        last_log_rec_lsn = lsn;
         if (last_log_rec_lsn.find(table_id) != last_log_rec_lsn.end()){
@@ -170,7 +235,7 @@ public:
     }
 
     inline void LogRecordToBuffer(LogRecord *l_rd)  {
-         log_record_buffer.push_back(l_rd);
+        log_record_buffer.emplace_back(l_rd);
     }
     inline std::vector<LogRecord *> &GetLogRecords(){
         return log_record_buffer;
@@ -179,7 +244,9 @@ public:
         log_record_buffer.clear();
     }
     inline void BufferOverwrittenVersion(uint64_t location){
-        overwritten_buffer.push_back(location);
+        txn_cnt_lock.Lock();
+        overwritten_buffer.emplace_back(location);
+        txn_cnt_lock.Unlock();
     }
     inline std::vector<uint64_t> &GetOverwrittenBuffer(){
         return overwritten_buffer;
@@ -208,18 +275,19 @@ private:
     /**
      * the max forward edge(high watermark) of the current txn
      */
-    cid_t predecessor;
+    std::atomic<cid_t> predecessor;
 
     /**
      * the min backward edge(low watermark) of the current txn
      */
-    cid_t successor;
+    std::atomic<cid_t> successor;
 
     /**
      * state of the txn
      */
-    bool is_abort_;
-    bool is_finish_;  // commit finished
+    bool is_aborted_ = false;
+    bool is_finished_ = false;  // commit finished
+    bool is_committing_ = false;
 
     ReadWriteSet rw_set_;
 
@@ -228,6 +296,8 @@ private:
 
     bool is_written_;
     size_t insert_count_;
+    bool is_loading_ = false;
+    SpinLatch txn_cnt_lock;
 
     IsolationLevelType isolation_level_;
 //    LSN_T last_log_rec_lsn;

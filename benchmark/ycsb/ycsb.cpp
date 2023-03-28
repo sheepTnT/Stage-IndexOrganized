@@ -50,10 +50,11 @@ void RunBenchmark() {
     //for leaf node
     leaf_node_pool = new DramBlockPool(default_blocks, default_blocks);
     //for inner node
-    RecordBufferPool *_pool = new RecordBufferPool(50000000000 ,50000000000);
+    //1MB*4096=4GB
+    RecordBufferPool *_pool = new RecordBufferPool(5000000 ,5000000);
     inner_node_pool = new InnerNodeBuffer(_pool);
-    //for undo buffer
-    RecordBufferPool *buffer_pool = new RecordBufferPool(50000000000,50000000000);
+    //1MB*4096=4GB
+    RecordBufferPool *buffer_pool = new RecordBufferPool(5000000,5000000);
     UndoBuffer *undo_buffer_pool = new UndoBuffer(buffer_pool);
     overwritten_buffer = new EphemeralPool(undo_buffer_pool);
     //initialize the transaction's undo buffer
@@ -66,15 +67,18 @@ void RunBenchmark() {
     PELOTON_ASSERT(overwritten_buffer, "conflict_buffer new fail.");
     PELOTON_ASSERT(version_store,"version_store get instance fail.");
 
-    ParameterSet param(64*1024, 32*1024,64*1024,100*10);
+    //inner node's split threshold
+    //leaf node's split thresholg = leaf node size
+    ParameterSet param(16*1024, 32*1024,64*1024,100*10);
+//    ParameterSet param(4*1024, 32*1024,16*1024,100*10);
 
     LogManager *log_mng = LogManager::GetInstance();
-    log_mng->Init();
 
     LOG_INFO("Loading database from scratch");
 
     //Create the database, initialize the version store
-    CreateYCSBDatabase(param, version_store, leaf_node_pool, inner_node_pool, overwritten_buffer);
+    CreateYCSBDatabase(param, version_store, log_mng,
+                       leaf_node_pool, inner_node_pool, overwritten_buffer);
 
     //Load the database
     LoadYCSBDatabase(version_store);
@@ -82,6 +86,7 @@ void RunBenchmark() {
     //Start logging
     //log_mng->LogStart();
     if(log_mng->IsLogStart()){
+        log_mng->Init();
         if(nvm_emulate){
             LOG_INFO("DRAM emulate log file.");
         }else{
@@ -93,8 +98,10 @@ void RunBenchmark() {
 
     size_t num_keys = (state.scale_factor);
     std::vector<uint32_t> keys;
-    for(int i = 0; i < num_keys; ++i)
+    for(int i = 0; i < num_keys; ++i){
         keys.push_back(i + 1);
+    }
+
 
 //    if (state.warmup_duration != 0) {
 //        RunWarmupWorkload(version_store, keys);

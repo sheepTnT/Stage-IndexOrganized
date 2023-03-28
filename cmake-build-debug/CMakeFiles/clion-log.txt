@@ -1,0 +1,6 @@
+/home/zhangqian/CLion-2020.2.4/clion-2020.2.4/bin/cmake/linux/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -G "CodeBlocks - Unix Makefiles" /home/zhangqian/paper-tests/stage
+-- GOOGLE_FRAMEWORK is defined, will use glog, gflags and gtest
+-- BUILD_TESTS: defined
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/zhangqian/paper-tests/stage/cmake-build-debug

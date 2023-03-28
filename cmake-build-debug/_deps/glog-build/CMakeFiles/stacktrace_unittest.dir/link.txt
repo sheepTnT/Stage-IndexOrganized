@@ -1,0 +1,1 @@
+/usr/bin/g++   -march=native -g  -rdynamic CMakeFiles/stacktrace_unittest.dir/src/stacktrace_unittest.cc.o  -o stacktrace_unittest  libglogd.a -lunwind -pthread 

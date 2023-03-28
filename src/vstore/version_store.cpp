@@ -11,7 +11,7 @@
 
 namespace mvstore{
 
-// 20*1024 * 64KB = 20GB
+// 20*1024 * 64KB = 20*64 MB = 1GB
 size_t dram_block_cap_in_bytes = default_blocks * DRAM_BLOCK_SIZE;
 size_t nvm_block_cap_in_bytes = default_nvm_blocks * NVM_BLOCK_SIZE;
 
@@ -656,8 +656,8 @@ std::pair<oid_t,TupleHeader *> VersionStore::GetEmptyTupleSlot(Catalog *catalog,
 
     //====================================================
     oid_t table_id = catalog->table_id;
-    uint64_t total_tuple_count = this->GetTotalCount(table_id);
-    size_t active_block_id = total_tuple_count % default_active_block_count_;
+//    uint64_t total_tuple_count = this->GetTotalCount(table_id);
+    size_t active_block_id = (rand()) % default_active_block_count_;
     VersionBlock *version_block = nullptr;
     oid_t tuple_slot = INVALID_OID;
     oid_t version_block_id = INVALID_OID;
@@ -666,6 +666,9 @@ std::pair<oid_t,TupleHeader *> VersionStore::GetEmptyTupleSlot(Catalog *catalog,
 
     // get valid tuple.
     while (true) {
+        if (SSNTransactionManager::GetInstance()->IsTxnRunning() == TxnMngRunning::STOP){
+            break;
+        }
         // get the last tile group.
         auto retir_active_version_blocks = retir_active_version_blocks_[table_id];
         version_block = retir_active_version_blocks[active_block_id];
@@ -681,18 +684,20 @@ std::pair<oid_t,TupleHeader *> VersionStore::GetEmptyTupleSlot(Catalog *catalog,
             version_block_id = version_block->GetBlockId();
             break;
         }
+
     }
 
     // if this is the last tuple slot we can get
     // then create a new active version block from manager
-    auto block_meta = version_block->GetBlockMeta();
-    auto alloc_tuple_count = block_meta->GetTotalTupleCount();
-    if (tuple_slot ==  (alloc_tuple_count - 1)) {
-        AddDefaultBlockToManager(catalog,active_block_id, false);
+    if (version_block != nullptr){
+        auto block_meta = version_block->GetBlockMeta();
+        auto alloc_tuple_count = block_meta->GetTotalTupleCount();
+        if (tuple_slot ==  (alloc_tuple_count - 1)) {
+            AddDefaultBlockToManager(catalog,active_block_id, false);
+        }
+        LOG_TRACE(" version block id: %u, address: %p, tuple header address:%p",
+                  version_block_id, version_block.get(), tupleHeader);
     }
-
-    LOG_TRACE(" version block id: %u, address: %p, tuple header address:%p",
-              version_block_id, version_block.get(), tupleHeader);
 
     return std::make_pair(version_block_id,tupleHeader);
 }
@@ -719,6 +724,9 @@ LSN_T VersionStore::LogRecordPersist(LogRecord *entry, char **data_ptr) {
 //    LOG_DEBUG("log record persist table id: %u , %u", table_id, active_block_id);
 
     while (true) {
+        if (SSNTransactionManager::GetInstance()->IsTxnRunning() == TxnMngRunning::STOP){
+            break;
+        }
         // get the last tile group.
         LOG_DEBUG("log record persist table id: %u , %zu", table_id, active_block_id);
         version_block = log_active_version_blocks_[active_block_id];

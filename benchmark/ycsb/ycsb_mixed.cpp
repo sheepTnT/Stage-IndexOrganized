@@ -20,14 +20,13 @@ bool RunMixed(VersionStore *version_store, const size_t thread_id, ZipfDistribut
     auto txn_manager = SSNTransactionManager::GetInstance();
     TransactionContext *txn = txn_manager->BeginTransaction(thread_id,
                                                             IsolationLevelType::SERIALIZABLE);
-    if (state.update_ratio == 0){txn->SetReadOnly();}
+//    if (state.update_ratio == double(0) ) {txn->SetReadOnly();}
 
     for (int i = 0; i < state.operation_count; i++) {
         auto rng_val = rng.NextUniform();
         //random a key
         auto lookup_key_idx = 0;
         if (state.random_mode){
-			
             lookup_key_idx = (rand() % ((keys.size())-0+1))+0;
         }else{
             //Zipf
@@ -45,11 +44,10 @@ bool RunMixed(VersionStore *version_store, const size_t thread_id, ZipfDistribut
             memset(delta_upt, chr, 100);
 
             uint32_t upt_len = 100 * 1;
-
             std::vector<oid_t> up_col;
             up_col.push_back(1);
 
-            bool is_for_update = true;
+            bool is_for_update = false;
             PointUpdateExecutor<const char *, YCSBTupleInt> update_executor(user_table,
                                                                         reinterpret_cast<const char *>(&lookup_key),
                                                                         sizeof(uint32_t),
@@ -62,10 +60,14 @@ bool RunMixed(VersionStore *version_store, const size_t thread_id, ZipfDistribut
 
             auto res = update_executor.Execute();
             if (!res) {
-                assert(txn->GetResult() != ResultType::SUCCESS);
-                txn_manager->AbortTransaction(txn);
+                if(txn->GetResult() != ResultType::SUCCESS)
+                {
+                    txn_manager->AbortTransaction(txn);
+                }
                 return false;
             }
+
+            delete delta_upt;
         } else {
             /////////////////////////////////////////////////////////
             // PERFORM READ
@@ -90,12 +92,17 @@ bool RunMixed(VersionStore *version_store, const size_t thread_id, ZipfDistribut
 
             auto res = lookup_executor.Execute();
             if (!res) {
-                assert(txn->GetResult() != ResultType::SUCCESS);
-                txn_manager->AbortTransaction(txn);
+                if(txn->GetResult() != ResultType::SUCCESS)
+                {
+                    txn_manager->AbortTransaction(txn);
+                }
                 return false;
             }
-//                    auto ret_size = lookup_executor.GetResults().size();
-//                    LOG_DEBUG("read result size : %zu", ret_size);
+
+            YCSBTupleInt *ret_ = const_cast<YCSBTupleInt *>(lookup_executor.GetRecord());
+            if (ret_ != nullptr){
+                delete ret_;
+            }
 
         }
 
@@ -105,12 +112,12 @@ bool RunMixed(VersionStore *version_store, const size_t thread_id, ZipfDistribut
     // transaction passed execution.
     assert(txn->GetResult() == ResultType::SUCCESS);
 
-    auto result = txn_manager->CommitTransaction(txn);
-
-    LogManager *log_manager = LogManager::GetInstance();
+    auto result = ResultType::SUCCESS;
+    result = txn_manager->CommitTransaction(txn);
     bool status_ret = true;
 
     if (result == ResultType::SUCCESS) {
+        LogManager *log_manager = LogManager::GetInstance();
         // transaction passed commitment.
         LOG_TRACE("commit txn, thread_id = %d, d_id = %d, next_o_id = %d",
                   (int) thread_id, (int) district_id, (int) d_next_o_id);
@@ -139,77 +146,128 @@ bool RunMixed(VersionStore *version_store, const size_t thread_id, ZipfDistribut
 
         return false;
     }
+
 }
-bool RunInsert(VersionStore *version_store, const size_t thread_id){
+bool RunScanInsert(VersionStore *version_store, const size_t thread_id, ZipfDistribution &zipf,
+                   FastRandom &rng, std::vector<uint32_t>& keys){
     auto txn_manager = SSNTransactionManager::GetInstance();
     TransactionContext *txn_ctx = txn_manager->BeginTransaction(thread_id,
-                                                            IsolationLevelType::SERIALIZABLE);
+                                                                IsolationLevelType::SERIALIZABLE);
 
+    int insert_count = 0;
     for (int i = 0; i < state.operation_count; i++) {
-       // int re2 = 0;
-        uint32_t rowid = min_rowid.fetch_add(1);
+        auto rng_val = rng.NextUniform();
+
+        if (rng_val < state.update_ratio) {
+            uint32_t  rowid = user_table->GetTupleCount() + 1;
 //        LOG_DEBUG("rowid: %u",rowid);
-        YCSBTupleInt tuple;
-        tuple.key = rowid;
-        for (int i = 0; i < COLUMN_COUNT; ++i)
-            memset(tuple.cols[i], rowid, sizeof(tuple.cols[i]));
+            YCSBTupleInt tuple;
+            tuple.key = rowid;
+            for (int i = 0; i < COLUMN_COUNT; ++i)
+                memset(tuple.cols[i], rowid, sizeof(tuple.cols[i]));
 
-        uint32_t k_ = rowid;
-        InsertExecutor<const char *, YCSBTupleInt> executor(user_table,
-                                                            (reinterpret_cast<const char *>(&k_)),
-                                                            sizeof(uint32_t),
-                                                            tuple,
-                                                            txn_ctx,
-                                                            version_store);
-        auto res = executor.Execute();
+            uint32_t k_ = rowid;
+            InsertExecutor<const char *, YCSBTupleInt> executor(user_table,
+                                                                (reinterpret_cast<const char *>(&k_)),
+                                                                sizeof(uint32_t),
+                                                                tuple,
+                                                                txn_ctx,
+                                                                version_store);
+            auto res = executor.Execute();
 
-        if (res) {
-            auto ret_code = executor.GetResultCode();
 
+            if (res ) {
+                auto ret_code = executor.GetResultCode();
+                if (ret_code.IsOk()){
+
+                }else{
+//                LOG_INFO("key insert fail, key=%u, result_code =%d ", k_, ret_code.rc);
+                    return false;
+                }
+
+            }else{
+                if(txn_ctx->GetResult() != ResultType::SUCCESS){
+                    txn_manager->AbortTransaction(txn_ctx);
+                }
+
+                return false;
+            }
+
+            ++insert_count;
         }else{
-            assert(txn_ctx->GetResult() != ResultType::SUCCESS);
-            txn_manager->AbortTransaction(txn_ctx);
-            return false;
+            auto lookup_key_idx = 0;
+            lookup_key_idx = zipf.GetNextNumber();
+            uint32_t sart_key = keys[lookup_key_idx - 1];
+            uint32_t scan_size = 10;
+
+            TableScanExecutor<const char *, YCSBTupleInt> scan_executor(user_table,
+                                                                        reinterpret_cast<const char *>(&sart_key),
+                                                                        sizeof(uint32_t),
+                                                                        scan_size,
+                                                                        txn_ctx,
+                                                                        version_store);
+
+
+            auto res = scan_executor.Execute();
+            if (!res) {
+                assert(txn_ctx->GetResult() != ResultType::SUCCESS);
+                txn_manager->AbortTransaction(txn_ctx);
+                return false;
+            }
+            auto rts = scan_executor.GetResults();
+            auto sz_rt = rts.size();
+            char *data = new char[100];
+            for (int j = 0; j < sz_rt; ++j) {
+                auto ycsb_tpl = rts[j];
+                auto cols = ycsb_tpl.cols;
+                auto ke = ycsb_tpl.key;
+                char *cols_loc = reinterpret_cast<char *>(&cols);
+                for (int k = 0; k < 10; ++k) {
+                    memcpy(data, (cols_loc+k*100), 100);
+                }
+            }
+//            LOG_DEBUG("scan executor size: %zu", scan_executor.GetResults().size());
         }
+
 
         ++num_rw_ops;
     }
+    auto txn_comm = txn_manager->CommitTransaction(txn_ctx);
 
-    assert(txn_ctx->GetResult() == ResultType::SUCCESS);
-
-    auto result = txn_manager->CommitTransaction(txn_ctx);
-
-    LogManager *log_manager = LogManager::GetInstance();
-    bool status_ret = true;
-
-    if (result == ResultType::SUCCESS) {
-        // transaction passed commitment.
-        LOG_TRACE("commit txn, thread_id = %d, d_id = %d, next_o_id = %d",
-                  (int) thread_id, (int) district_id, (int) d_next_o_id);
-        if (log_manager->IsLogStart()){
-            auto rw_set = txn_ctx->GetReadWriteSet();
-            auto end_commit_id = txn_ctx->GetCommitId();
-            if (!txn_ctx->IsReadOnly() && !rw_set.empty()){
-                std::vector<LSN_T> result;
-                auto on_complete = [&status_ret, &result](bool status,
-                                                          TransactionContext *txn_,
-                                                          std::vector<LSN_T> &&values) {
-                    result = values;
-                    status_ret = status;
-//                txn_->ClearLogRecords();
-                };
-                LogManager::LogWrite(txn_ctx, end_commit_id, on_complete);
-            }
-        }
-
-        return status_ret;
-
-    } else {
-        // transaction failed commitment.
-        assert(result == ResultType::ABORTED || result == ResultType::FAILURE);
-
+    if (txn_comm == ResultType::SUCCESS){
+        user_table->IncreaseTupleCount(insert_count);
+        return true;
+    } else{
         return false;
     }
+
+//    LogManager *log_manager = LogManager::GetInstance();
+//    bool status_ret = true;
+//
+//    if (result == ResultType::SUCCESS) {
+//        // transaction passed commitment.
+//        LOG_TRACE("commit txn, thread_id = %d, d_id = %d, next_o_id = %d",
+//                  (int) thread_id, (int) district_id, (int) d_next_o_id);
+//        if (log_manager->IsLogStart()){
+//            auto rw_set = txn_ctx->GetReadWriteSet();
+//            auto end_commit_id = txn_ctx->GetCommitId();
+//            if (!txn_ctx->IsReadOnly() && !rw_set.empty()){
+//                std::vector<LSN_T> result;
+//                auto on_complete = [&status_ret, &result](bool status,
+//                                                          TransactionContext *txn_,
+//                                                          std::vector<LSN_T> &&values) {
+//                    result = values;
+//                    status_ret = status;
+////                txn_->ClearLogRecords();
+//                };
+//                LogManager::LogWrite(txn_ctx, end_commit_id, on_complete);
+//            }
+//        }
+//
+//        return status_ret;
+//
+//    }
+
 }
 
 bool RunMixedString(VersionStore *version_store, const size_t thread_id, ZipfDistribution &zipf,

@@ -11,6 +11,8 @@
 #include <list>
 #include "../vstore/version_store.h"
 #include "../vstore/record_meta.h"
+#include "../tbb/concurrent_vector.h"
+#include "../tbb/parallel_sort.h"
 
 namespace mvstore {
 
@@ -20,6 +22,7 @@ extern thread_local size_t num_rw_ops;
 
 struct ParameterSet {
      const uint32_t split_threshold;
+//     const uint32_t leaf_split_threshold;
      const uint32_t merge_threshold;
      const uint32_t leaf_node_size;
      uint32_t payload_size;
@@ -29,7 +32,8 @@ struct ParameterSet {
 
     ParameterSet(uint32_t split_threshold_, uint32_t merge_threshold_,
                  uint32_t leaf_node_size_,  uint32_t payload_size_)
-            : split_threshold(split_threshold_), merge_threshold(merge_threshold_),
+            : split_threshold(split_threshold_),
+              merge_threshold(merge_threshold_),
               leaf_node_size(leaf_node_size_), payload_size(payload_size_) {}
 
     ~ParameterSet()  = default;
@@ -37,15 +41,15 @@ struct ParameterSet {
 
 struct ReturnCode {
     enum RC {
-        RetInvalid,
-        RetOk,
-        RetKeyExists,
-        RetNotFound,
-        RetNodeFrozen,
-        RetCASFail,
-        RetNotEnoughSpace,
-        RetNotNeededUpdate,
-        RetRetryFailure,
+        RetInvalid,           //0
+        RetOk,                //1
+        RetKeyExists,         //2
+        RetNotFound,          //3
+        RetNodeFrozen,        //4
+        RetCASFail,           //5
+        RetNotEnoughSpace,    //6
+        RetNotNeededUpdate,   //7
+        RetRetryFailure,      //8
         RetDirty
     };
 
@@ -128,7 +132,12 @@ public:
         }
         return cmp;
     }
-
+    struct myCmp{
+        bool operator() (const std::pair<uint32_t, RecordMetadata> &a,
+                          const std::pair<uint32_t, RecordMetadata> &b) const{
+            return a.first < b.first;
+        }
+    };
     // Check if the key in a range, inclusive
     // -1 if smaller than left key
     // 1 if larger than right key
@@ -210,8 +219,8 @@ public:
         auto entry_ = inner_node_buffer->NewEntry(alloc_size);
         char *inner_node_ = entry_.second;
         *new_node = reinterpret_cast<InternalNode *>(inner_node_);
-
         VSTORE_MEMSET((*new_node), 0, alloc_size);
+
         (*new_node)->header.size = alloc_size;
         (*new_node)->segment_index = entry_.first;
     }
@@ -329,6 +338,7 @@ public:
 
         RecordMetadata red_child = record_metadata[index];
         GetRawRecord(red_child, nullptr, nullptr, &child_addr);
+//        LOG_DEBUG("child_addr = %lu, index = %u", child_addr, index);
 
         BaseNode *rt_node = reinterpret_cast<BaseNode *> (child_addr);
         return rt_node;
@@ -389,7 +399,7 @@ public:
 
 struct Record{
     RecordMeta meta;
-    //pstamp/key/payload/
+    //cstamp/key/payload/
     char tuple_data_[0];
 
     explicit Record(RecordMeta meta) : meta(meta){}
@@ -399,22 +409,22 @@ struct Record{
             return nullptr;
         }
 
-        Record *r = nullptr;
+        Record *record = nullptr;
         uint32_t key_len = meta.meta_data.GetPaddedKeyLength();
         size_t rd_alloc_size = sizeof(cid_t) + key_len + payload_size + sizeof(meta);
         char *new_r = new char[rd_alloc_size];
-        r = reinterpret_cast<Record *>(new_r);
-        new(r) Record(meta);
+        record = reinterpret_cast<Record *>(new_r);
+        new(record) Record(meta);
 
         // Key will never be changed
         // but payload is not fixed length value, can be updated
         char *source_addr = (reinterpret_cast<char *>(node) + meta.meta_data.GetOffset());
-        memcpy(r->tuple_data_ + sizeof(cid_t), source_addr, key_len);
+        memcpy(record->tuple_data_ + sizeof(cid_t), source_addr, key_len);
 
         char *payload = source_addr + key_len;
-        memcpy(r->tuple_data_ + sizeof(cid_t) + key_len, payload, payload_size);
+        memcpy(record->tuple_data_ + sizeof(cid_t) + key_len, payload, payload_size);
 
-        return r;
+        return record;
     }
 
     static inline Record *Neww(RecordMeta meta, char *copy_location, uint32_t payload_size) {
@@ -494,9 +504,74 @@ struct Record{
     }
 };
 
+class Sorter {
+
+    /**
+     *
+     */
+    Sorter(){  }
+
+    /**
+     * Destructor.
+     */
+    ~Sorter();
+
+public:
+
+    static Sorter *GetSorter(){
+        Sorter *sorter_ = nullptr;
+
+        sorter_ = new Sorter();
+
+        return sorter_;
+    }
+    static const inline int KeyCompare(const char *key1, uint32_t size1,
+                                       const char *key2, uint32_t size2) {
+        if (!key1) {
+            return -1;
+        } else if (!key2) {
+            return 1;
+        }
+        int cmp;
+
+        if (std::min(size1, size2) < 16) {
+            cmp = my_memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+        } else {
+            cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+        }
+        if (cmp == 0) {
+            return size1 - size2;
+        }
+        return cmp;
+    }
+
+    /**
+     * Sort all inserted entries.
+     */
+    void Sort(std::vector<std::pair<uint64_t,std::pair<const char *, uint32_t>>> &vec){
+        const auto key_cmp = [](const std::pair<uint64_t,std::pair<const char *, uint32_t>> &m_1,
+                                const std::pair<uint64_t,std::pair<const char *, uint32_t>> &m_2) -> bool {
+//            RecordMetadata *m1 = reinterpret_cast<RecordMetadata *>(m_1.first);
+//            RecordMetadata *m2 = reinterpret_cast<RecordMetadata *>(m_2.first);
+            const auto l1 = m_1.second.second;
+            const auto l2 = m_2.second.second;
+            const char *k1 = m_1.second.first;
+            const char *k2 = m_2.second.first;
+            return KeyCompare(k1, l1, k2, l2) < 0;
+        };
+
+        // Sort the record meta data by key
+        std::sort(vec.begin(), vec.end(), key_cmp);
+    }
+
+
+
+};
+
 class LeafNode : public BaseNode {
 
 public:
+
     static void New(LeafNode **mem, uint32_t node_size,DramBlockPool *leaf_node_pool);
 
     static inline uint32_t GetUsedSpace(NodeHeader::StatusWord status) {
@@ -553,8 +628,8 @@ public:
     // record metadata vector. Recods covered by [begin_it, end_it) will be
     // inserted to the node. Note end_it is non-inclusive.
     void CopyFrom(LeafNode *node,
-                  typename std::vector<RecordMetadata>::iterator begin_it,
-                  typename std::vector<RecordMetadata>::iterator end_it,
+                  typename std::vector<uint64_t>::iterator begin_it,
+                  typename std::vector<uint64_t>::iterator end_it,
                   uint32_t payload_size, cid_t commit_id);
 
     ReturnCode RangeScanBySize(const char *key1,
@@ -570,7 +645,8 @@ public:
 
     // Specialized GetRawRecord for leaf node only (key can't be nullptr)
     inline bool GetRawRecord(RecordMetadata meta, char **key, char **payload) {
-        assert(meta.GetPaddedKeyLength());
+        if (meta.meta == 0 || meta.GetPaddedKeyLength() <= 0) return false;
+//        assert(meta.GetPaddedKeyLength());
         char *tmp_data = reinterpret_cast<char *>(this) + meta.GetOffset();
 
         auto padded_key_len = meta.GetPaddedKeyLength();
@@ -625,7 +701,7 @@ public:
     }
 
     // Make sure this node is frozen before calling this function
-    uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
+    uint32_t SortMetadataByKey(std::vector<uint64_t> &vec,
                                bool visible_only, uint32_t payload_size);
 
     /**
@@ -722,6 +798,7 @@ public:
         root = reinterpret_cast<BaseNode *>(leaf_node_pool->Get());
         LeafNode **root_node = reinterpret_cast<LeafNode **>(&root);
         LeafNode::New(root_node, parameters.leaf_node_size, leaf_node_pool);
+
         AddDefaultRecordIndirectionArray();
     }
 
@@ -771,6 +848,15 @@ public:
     oid_t AddDefaultRecordIndirectionArray();
     void RecordIndirectLocation(RecordLocation **location);
 
+    void IncreaseTupleCount(const size_t &amount){
+        number_of_tuples += amount;
+    }
+    void DecreaseTupleCount(const size_t &amount){
+        number_of_tuples -= amount;
+    }
+
+    size_t GetTupleCount() const{return number_of_tuples;}
+
     Catalog &GetTableSchema(){
         return schema;
     }
@@ -779,6 +865,7 @@ public:
     InnerNodeBuffer *inner_node_pool;
     ParameterSet parameters;
     Catalog schema;
+    std::atomic<size_t> number_of_tuples = ATOMIC_VAR_INIT(0);
     //for overwrittern record versions
     EphemeralPool *overwritten_buffer_;
 

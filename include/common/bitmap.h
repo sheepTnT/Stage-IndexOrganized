@@ -55,7 +55,7 @@ class RawBitmap {
   static RawBitmap *Allocate(const uint32_t num_bits) {
     auto size = SizeInBytes(num_bits);
     auto *result = new uint8_t[size];
-    std::memset(result, 0, size);
+    //VSTORE_MEMSET(result, 0, size);
     return reinterpret_cast<RawBitmap *>(result);
   }
 

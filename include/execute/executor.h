@@ -37,7 +37,11 @@ public:
                                                    txn_id);
         if(insert_res.IsOk()) {
             // RetOk/RetKeyExists, record rw_set
-            transaction_manager->PerformInsert(txn_ctx, meta);
+            auto txn_ret = transaction_manager->PerformInsert(txn_ctx, meta);
+            if (!txn_ret){
+                transaction_manager->SetTransactionResult(txn_ctx, ResultType::FAILURE);
+                return false;
+            }
             //Log Record
 //            payload_location = reinterpret_cast<const char *>(meta.meta_ptr);
             RecordLocation *meta_location = meta.meta_data.GetLocationPtr();
@@ -59,9 +63,9 @@ public:
                 txn_ctx->LogRecordToBuffer(lg_rcd);
             }
         }else if(insert_res.IsKeyExists()){
-//            std::string k_str = reinterpret_cast<const char *>(k_);
-            std::string table_name = data_table->schema.table_name;
-            LOG_DEBUG("btree insert, key has already exists, table name: %s", table_name.c_str());
+//            uint32_t key_ = *reinterpret_cast<uint32_t *>(k_);
+//            std::string table_name = data_table->schema.table_name;
+//            LOG_DEBUG("btree insert, key has already exists, key: %zu", );
         }else if(insert_res.IsCASFailure()){
 //            LOG_INFO("btree insert, CAS failure , key: %lu",k_);
             ret_code = ReturnCode::CASFailure();
@@ -69,7 +73,6 @@ public:
 //            LOG_INFO("btree insert, retry failure , key: %lu",k_);
             ret_code = ReturnCode::RetryFailure();
         }else{
-            transaction_manager->SetTransactionResult(txn_ctx, ResultType::FAILURE);
             return false;
         }
 
@@ -206,7 +209,7 @@ public:
         const char *tuple_data = delta_tuple;
         bool up_ret = true;
         auto txn_id = txn_ctx->GetReadId();
-//        int retry_count = 0;
+        std::atomic<int> retry_count = ATOMIC_VAR_INIT(0);
         oid_t table_id = data_table->GetTableSchema().table_id;
 
         RecordMeta meta_upt;
@@ -223,6 +226,7 @@ public:
         //                         log delta data many times
         Key k_ = keys;
 
+        retry_upt:
         ReturnCode update_res = data_table->Update(k_,
                                                    key_size,
                                                    tuple_data,
@@ -286,6 +290,9 @@ public:
                     LOG_DEBUG("update, transaction fail.");
                     failed = true;
                 }
+
+                RawBitmap::Deallocate(bitmap);
+
             }
 
         }else if(update_res.IsNotFound()){
@@ -297,12 +304,21 @@ public:
             failed = true;
         }
 
+        if (failed){
+            if(retry_count > 5){
+                failed = true;
+            }else{
+                retry_count++;
+                goto retry_upt;
+            }
+        }
 
         if (failed) {
             transaction_manager->SetTransactionResult(txn_ctx, ResultType::FAILURE);
         }else{
             transaction_manager->SetTransactionResult(txn_ctx, ResultType::SUCCESS);
         }
+
         return !failed;
     }
 
@@ -350,7 +366,7 @@ public:
     virtual bool Execute() override {
         auto transaction_manager = SSNTransactionManager::GetInstance();
         bool failed = false;
-        std::unique_ptr<Record> current_record;
+
         std::unique_ptr<Iterator> iter;
         Key k_ = start_key;
         auto txn_id = txn->GetReadId();
@@ -368,7 +384,6 @@ public:
                 auto cstamp = current_record->GetCstamp();
                 if (txn_id >= curr_rcd_comm_id) {
                     //Record(data)<key,payload>
-                    auto data_ = reinterpret_cast<T *>(current_record->GetData());
                     bool read_ret = true;
                     if (!is_for_update){
                         //read own need not check
@@ -378,8 +393,13 @@ public:
                     }
                     if (read_ret) {
                         //<key,payload(Tuple)>
-                        results.push_back(data_);
+                        ycsb_tuple = new T;
+                        VSTORE_MEMCPY(ycsb_tuple, current_record->GetData(), sizeof(T));
+                        auto record = current_record.get();
+                        delete record;
                         current_record.release();
+                        current_record.reset(nullptr);
+
                     }else{
                         failed = true;
                     }
@@ -401,10 +421,12 @@ public:
                                 }
                                 if (txn_id >= begn && txn_id <= comm) {
                                     //Record(data)<key,payload>
-                                    auto data_ = reinterpret_cast<T *>(tpl_hd->GetTupleSlot());
-                                    results.push_back(data_);
-
+                                    VSTORE_MEMCPY(ycsb_tuple, reinterpret_cast<T *>(tpl_hd->GetTupleSlot()), sizeof(T));
+                                    auto record = current_record.get();
+                                    delete record;
                                     current_record.release();
+                                    current_record.reset(nullptr);
+
                                     break;
                                 }else{
                                     auto tpl_nxt_prt = tpl_hd->GetNextHeaderPointer();
@@ -427,6 +449,7 @@ public:
                     }
                 }
             } else{
+                ycsb_tuple = nullptr;
                 LOG_DEBUG("there is no active version, table name: %s", data_table->schema.table_name);
             }
         } else {
@@ -527,6 +550,10 @@ public:
         return results;
     }
 
+    const T *GetRecord(){
+        return ycsb_tuple;
+    }
+
 private:
     BTree *data_table;
     Key start_key;
@@ -538,6 +565,8 @@ private:
     TransactionContext *txn;
     VersionStore *buf_mgr;
     std::vector<T *> results;
+    T *ycsb_tuple;
+    std::unique_ptr<Record> current_record;
 };
 
 template<class Key, class T>

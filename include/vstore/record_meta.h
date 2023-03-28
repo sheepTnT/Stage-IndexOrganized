@@ -53,7 +53,7 @@ struct RecordMetadata{
         return !operator==(rhs);
     }
 
-    RecordMetadata() : meta(0),next_ptr(0) {}
+    RecordMetadata() : meta(0),next_ptr(0),loc_ptr(new RecordLocation()) {}
     explicit RecordMetadata(uint64_t meta) : meta(meta), next_ptr(0), loc_ptr(0) {}
     RecordMetadata(uint64_t meta, uint64_t next, RecordLocation *location) :
                                     meta(meta), next_ptr(next), loc_ptr(location) {}

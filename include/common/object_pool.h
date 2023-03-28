@@ -94,7 +94,11 @@ namespace mvstore {
          */
         T *Get() {
             SpinLatch::ScopedSpinLatch guard(&latch_);
-            if (reuse_queue_.empty() && current_size_ >= size_limit_) throw NoMoreObjectException(size_limit_);
+            if (reuse_queue_.empty() && current_size_ >= size_limit_){
+//                std::cout << "object pool dram pool current size: " << current_size_ <<
+//                        ", size limit: " << size_limit_ << std::endl;
+                throw NoMoreObjectException(size_limit_);
+            }
             T *result = nullptr;
             if (reuse_queue_.empty()) {
                 result = alloc_.New();  // result could be null because the allocator may not find enough memory space
@@ -165,8 +169,9 @@ namespace mvstore {
          * be unsafe to access after entering this call.
          *
          * @param obj pointer to object to release
+         * @param inner_leaf 0 leaf, 1 inner, 2 undolog
          */
-        void Release(T *obj) {
+        void Release(T *obj, int inner_or_leaf_or_log) {
             PELOTON_ASSERT(obj != nullptr, "releasing a null pointer");
             SpinLatch::ScopedSpinLatch guard(&latch_);
             if (reuse_queue_.size() >= reuse_limit_) {
@@ -176,14 +181,17 @@ namespace mvstore {
                 reuse_queue_.push(obj);
             }
 
-//           std::cout << "object pool release, current size: %u, size limit : %u" << current_size_ <<
-//           ","<< size_limit_ << std::endl;
+//           std::cout << "object pool release, current size:" << current_size_
+//                     <<", size limit :"<< size_limit_
+//                     <<", release object: " << inner_or_leaf_or_log << std::endl;
         }
 
         /**
          * @return size limit of the object pool
          */
-        uint64_t GetSizeLimit() const { return size_limit_; }
+        uint64_t GetSizeLimit() const {
+            return size_limit_;
+        }
 
         uint64_t GetCurrentSize() const{
             return current_size_;

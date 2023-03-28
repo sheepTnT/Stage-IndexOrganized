@@ -20,7 +20,8 @@ void RunWorkload(VersionStore *version,  std::vector<uint32_t>&);
 
 void RunWarmupWorkload(VersionStore *version,  std::vector<uint32_t>&);
 
-bool RunInsert(VersionStore *version_store, const size_t thread_id);
+bool RunScanInsert(VersionStore *version_store, const size_t thread_id,  ZipfDistribution &zipf,
+                   FastRandom &rng,  std::vector<uint32_t>&);
 
 bool RunMixed(VersionStore *version, const size_t thread_id, ZipfDistribution &zipf,
               FastRandom &rng,  std::vector<uint32_t>&);

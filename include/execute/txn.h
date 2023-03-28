@@ -11,8 +11,70 @@
 #include <set>
 #include "../vstore/version_store.h"
 #include "txn_context.h"
+#include "../include/common/concurrent_bytell_hash_map.h"
 
 namespace mvstore {
+
+//struct SsnTxnContext {
+//    SsnTxnContext(TransactionContext *t)
+//            : transaction_(t),
+//              predecessor(0),
+//              successor(MAX_CID),
+////              cstamp(0),
+//              is_abort_(false),
+//              is_finish_(false) {}
+//    TransactionContext *transaction_;
+//
+//    // is_abort() could run without any locks
+//    // because if it returns wrong result, it just leads to a false abort
+//    inline bool is_abort() {
+//        return is_abort_;
+//    }
+//    inline bool is_finish() {
+//        return is_finish_;
+//    }
+////    inline bool is_commiting(){
+////        return is_comitting_;
+////    }
+//
+//    inline void SetSuccessor(const cid_t sstamp) { successor = sstamp; }
+//
+//    inline cid_t GetSuccessor() const { return successor; }
+//
+//    inline void SetPredecessor(const cid_t pstamp) { predecessor = pstamp; }
+//
+//    inline cid_t GetPredecessor() const { return predecessor; }
+//
+//    void SetFinished(){is_finish_ = true;}
+//
+//    bool IsFinished(){return is_finish_;}
+//
+//    void SetAbort(){is_abort_ = true;}
+//
+//    bool IsAbort(){return is_abort_;}
+//
+//    /**
+//     * the max forward edge(high watermark) of the current txn
+//     */
+//    cid_t predecessor;
+//
+//    /**
+//     * the min backward edge(low watermark) of the current txn
+//     */
+//    cid_t successor;
+//    /**
+//     * commit timestamp
+//     */
+//    cid_t cstamp;
+//
+//    /**
+//     * state of the txn
+//     */
+//    bool is_abort_;
+//    bool is_finish_;  // commit finished
+//    SpinLatch lock_;
+//};
+//extern thread_local SsnTxnContext *current_ssn_txn_ctx;
 
 /**
 * @brief      Class for (Repeatable read + SSN) transaction manager.
@@ -40,9 +102,9 @@ public:
 
     bool EraseTid(const txn_id_t tid);
 
-    cid_t FindMaxPstamp(TransactionContext *const current_txn);
+    bool FindMaxPstamp(TransactionContext *const current_txn);
 
-    cid_t FindMinSstamp(TransactionContext *const current_txn);
+    bool FindMinSstamp(TransactionContext *const current_txn);
 
     /**
      * @brief      Gets the instance.
@@ -58,6 +120,7 @@ public:
             overwritten_buffer_pool = buffer_pool;
         }
         inited = true;
+        StartTxnRunning();
         return Status::OK();
     }
 
@@ -128,10 +191,20 @@ public:
         task_callback_arg_ = task_callback_arg;
     }
 
+    void StopTxnRunning(){
+        txn_mng_running = TxnMngRunning::STOP;
+    }
+    void StartTxnRunning(){
+        txn_mng_running = TxnMngRunning::STARTING;
+    }
+    TxnMngRunning IsTxnRunning(){
+        return txn_mng_running;
+    }
+
     void (*task_callback_)(void *);
     void *task_callback_arg_;
 
-
+    volatile std::atomic<TxnMngRunning> txn_mng_running;
 private:
     static IsolationLevelType isolation_level_;
     bool inited = false;
@@ -139,7 +212,7 @@ private:
     //hold the overeritten record versions
     EphemeralPool *overwritten_buffer_pool;
     SpinLatch latch_;
-
+    concurrent_bytell_hash_map<cid_t, TransactionContext *, std::hash<cid_t>> active_tids;
 };
 
 }

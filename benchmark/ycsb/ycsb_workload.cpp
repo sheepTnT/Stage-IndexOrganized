@@ -138,12 +138,17 @@ void RunWarmupBackend(VersionStore *version_store, const size_t thread_id,
     }
 
 }
-void RunInsertBackend(VersionStore *version_store, const size_t thread_id) {
+void RunInsertBackend(VersionStore *version_store, const size_t thread_id,
+                      std::vector<uint32_t> keys) {
 
     PinToCore(thread_id);
 
     PadInt &execution_count_ref = abort_counts[thread_id];
     PadInt &transaction_count_ref = commit_counts[thread_id];
+
+    ZipfDistribution zipf((state.scale_factor) - 1, state.zipf_theta);
+
+    FastRandom rng(rand());
 
     // backoff
     uint32_t backoff_shifts = 0;
@@ -154,7 +159,7 @@ void RunInsertBackend(VersionStore *version_store, const size_t thread_id) {
         //LOG_INFO("%d working %d", thread_id, cnt);
         size_t num_rw_ops_snap = num_rw_ops;
 
-        while (!RunInsert(version_store, thread_id)) {
+        while (!RunScanInsert(version_store, thread_id, zipf, rng, keys)) {
             if (!is_running) {
                 break;
             }
@@ -276,6 +281,7 @@ void RunBackend(VersionStore *version_store, const size_t thread_id,
                 //ycsb statistic the operation nums
                 //LOG_INFO("%u num_rw_ops, %d num_rw_ops_snap", num_rw_ops,num_rw_ops_snap);
                 transaction_count_ref.data += num_rw_ops - num_rw_ops_snap;
+//                std::this_thread::sleep_for(std::chrono::microseconds(100));
             }
         }
     }
@@ -465,9 +471,10 @@ void print_environment()
 void RunWorkload(VersionStore *version_store,  std::vector<uint32_t> &keys) {
     size_t num_threads = state.backend_count;
     min_rowid = 0 ;
-    int tuple_count = state.scale_factor;
-    min_rowid.fetch_add(tuple_count);
+//    int tuple_count = state.scale_factor;
+//    min_rowid.fetch_add(tuple_count);
     std::vector<std::thread> thread_group;
+    sync::ThreadPool the_tp(num_threads);
 
     abort_counts = new PadInt[num_threads];
     memset(abort_counts, 0, sizeof(PadInt) * num_threads);
@@ -509,23 +516,39 @@ void RunWorkload(VersionStore *version_store,  std::vector<uint32_t> &keys) {
         *before_sstate = getSystemCounterState();
     }
 
-//    sync::CountDownLatch latch(num_threads);
-//    srand(time(0));
+    sync::CountDownLatch latch(num_threads);
+    srand(time(0));
+
+    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
+        the_tp.enqueue([thread_itr, &latch, version_store,  keys]() {
+            //LOG_INFO("Thread %d started", thread_itr);
+            RunBackend(version_store, thread_itr, keys);
+            //LOG_INFO("Thread %d ended", thread_itr);
+            latch.CountDown();
+        });
+    }
 
 //    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
-//        thread_group.push_back(std::move(std::thread(RunInsertBackend, version_store, thread_itr)));
+//        the_tp.enqueue([thread_itr, &latch, version_store,  keys]() {
+//            //LOG_INFO("Thread %d started", thread_itr);
+//            RunInsertBackend(version_store, thread_itr,  keys);
+//            //LOG_INFO("Thread %d ended", thread_itr);
+//            latch.CountDown();
+//        });
 //    }
-    thread_group.resize(num_threads + state.vc_start);
-    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
-        thread_group.push_back(std::move(std::thread(RunBackend, version_store, thread_itr, keys)));
-    }
+
+//    thread_group.resize(num_threads + state.vc_start);
+//    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
+//        thread_group.push_back(std::move(std::thread(RunBackend, version_store, thread_itr, keys)));
+//    }
 
     //start version cleanning
-    if (state.vc_start){
-        thread_group.push_back(std::move(std::thread(VersionCleaner::CleanVersionsProcessing, profile_round)));
-    }
+//    if (state.vc_start){
+//        thread_group.push_back(std::move(std::thread(VersionCleaner::CleanVersionsProcessing, profile_round)));
+//    }
 
-    for (size_t round_id = 0; round_id < profile_round; ++round_id) {
+    for (size_t round_id = 0; round_id < profile_round; ++round_id)
+    {
         std::this_thread::sleep_for(
                 std::chrono::milliseconds(int(state.profile_duration * 1000)));
         memcpy(abort_counts_profiles[round_id], abort_counts,
@@ -540,12 +563,24 @@ void RunWorkload(VersionStore *version_store,  std::vector<uint32_t> &keys) {
 
     state.profile_memory.push_back(state.profile_memory.at(state.profile_memory.size() - 1));
 
+    SSNTransactionManager *transaction_manager = SSNTransactionManager::GetInstance();
+    int txn_is_running = static_cast<int>(transaction_manager->IsTxnRunning());
+    LOG_INFO(" is_running %d, txn_is_running %d", is_running,txn_is_running);
+    transaction_manager->StopTxnRunning();
+    txn_is_running = static_cast<int>(transaction_manager->IsTxnRunning());
+
+//    std::this_thread::sleep_for(std::chrono::milliseconds(int(100)));
+
     is_running = false;
 
+    LOG_INFO(" is_running %d, txn_is_running %d", is_running,txn_is_running);
+
     // Join the threads with the main thread
-    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
-        thread_group[thread_itr].join();
-    }
+//    for (size_t thread_itr = 0; thread_itr < num_threads; ++thread_itr) {
+//        thread_group[thread_itr].join();
+//    }
+
+    latch.Await();
 
     if (enable_pcm){
         std::unique_ptr<SystemCounterState> after_sstate;
@@ -635,6 +670,8 @@ void RunWorkload(VersionStore *version_store,  std::vector<uint32_t> &keys) {
     if (state.scan_mode){
         state.scan_latency = (state.duration * 1000) / (total_commit_count * 1.0);//millisecond
     }
+
+    LOG_INFO("user table current count = %zu", user_table->GetTupleCount());
 
     // cleanup everything.
     for (size_t round_id = 0; round_id < profile_round; ++round_id) {

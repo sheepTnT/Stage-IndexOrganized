@@ -63,13 +63,15 @@ static constexpr LSN_T InvalidLSN = std::numeric_limits<LSN_T>::min();
 #define INVALID_TYPE_ID  0
 #define CACHE_LINE_SIZE	 64
 
-static const size_t default_active_block_count_ = 10;
+static const size_t default_active_block_count_ = 20;
 
 static size_t default_blocks = 40*1024;
 static size_t default_nvm_blocks = 2*1024;
 
-//64KB*1024*1024/64 =64GB/64=1GB
-//static size_t default_blocks = 512*1024;
+//64KB*1024*1024=64GB
+//64KB*1024*512=32GB
+//64KB*1024*128=16GB
+//static size_t default_blocks = 2048*1024;
 //static size_t default_nvm_blocks = 30*1024;
 
 
@@ -87,7 +89,10 @@ static void *block_aligned_alloc(std::size_t sz) {
     }
     return ptr;
 }
-
+enum class TxnMngRunning{
+    STARTING,
+    STOP
+};
 enum class BTreeState {
     FAILED,
     UPDATED,
