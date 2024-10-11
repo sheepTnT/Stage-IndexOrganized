@@ -82,8 +82,6 @@ The output looks like this:
  scan_latency(ms) : 0.000000
 
 ```
-Our testing results:
-<div align=left background=#c0c0c0><img src="https://user-images.githubusercontent.com/12605803/179177048-00bcebf9-d5d0-45e3-8a27-5c6688321948.png", width="800", height="300" /></div>
 
 
 ## Run it with TPCC/HYBRID
