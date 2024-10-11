@@ -1,0 +1,3 @@
+[submodule "peloton-ssn"]
+	path = peloton-ssn
+	url = https://github.com/gitzhqian/peloton-vto-ssi-ssn.git
