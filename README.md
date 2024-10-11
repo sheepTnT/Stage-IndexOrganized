@@ -1,12 +1,12 @@
 # What is Stage ?
-An index organized data layout scheme for in-memory database systems.
+An index organized data layout scheme for modern main memory database systems.
 
 # Implementations
 This repo contains our open-source implementations:
-- An index_organized layout designed for in-memory DBMSs to store data.
+- An index_organized layout designed for main memory database system to store data.
 - A staged approach to maintain the lifetimes of the record versions.
-- An active version tree, which is a modified version of the [BzTree](https://github.com/sfu-dis/bztree) for volatile memory(DRAM).
-- Optimistic concurrency control policy designed for hot record versions.
+- An tree index to store the latest versions, which is a modified version of the [BzTree](https://github.com/sfu-dis/bztree) for volatile memory(DRAM).
+- Optimistic concurrency control policy designed for hot record versions, Index-SSN.
 - YCSB/TPCC/HYBRID workload benchmarks refered to other researches, e.g.[spitfire](https://github.com/zxjcarrot/spitfire), [ermia](https://github.com/sfu-dis/ermia).
 
 # Building
@@ -111,8 +111,6 @@ overall throughputs:
  ch_q2* latency(ms) : 0.000000
 
 ```
-Our testing results with 20warehouse:
-<div align=left><img src="https://user-images.githubusercontent.com/12605803/179178001-ed048d29-3fc3-4e7b-a247-6d510422b92b.png", width ="800", height="300" /></div>
 
 
 # For Logging
@@ -147,8 +145,6 @@ PCM Metrics:
 	NVM Writes (bytes): 10667072
 
 ```
-Our testing results with 40warehouse:
-<div align=left><img src="https://user-images.githubusercontent.com/12605803/179178062-d5203ee9-69b4-4ab1-b22a-8bd49c931b5f.png" width="600", height="300" /></div>
 
 
 # Caveats
