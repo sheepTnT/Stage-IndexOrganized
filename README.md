@@ -82,6 +82,7 @@ The output looks like this:
  scan_latency(ms) : 0.000000
 
 ```
+https://github.com/gitzhqian/Stage-IndexOrganized/blob/main/figure12.pdf
 
 
 ## Run it with TPCC/HYBRID
@@ -109,7 +110,7 @@ overall throughputs:
  ch_q2* latency(ms) : 0.000000
 
 ```
-
+https://github.com/gitzhqian/Stage-IndexOrganized/blob/main/figure13.pdf
 
 # For Logging
 
