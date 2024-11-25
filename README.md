@@ -9,8 +9,6 @@ This repo contains our open-source implementations:
 - Optimistic concurrency control policy designed for hot record versions, Index-SSN.
 - YCSB/TPCC/HYBRID workload benchmarks refered to other researches, e.g.[spitfire](https://github.com/zxjcarrot/spitfire), [ermia](https://github.com/sfu-dis/ermia).
 
-# Building
-
 ## Environment
 The code has been tested on Ubuntu 20.04 with gcc version 9.4.0 and cmake3.17.
 
